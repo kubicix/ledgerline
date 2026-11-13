@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Ledgerline.BuildingBlocks;
 using Ledgerline.BuildingBlocks.Messaging;
+using Ledgerline.BuildingBlocks.Messaging.Outbox;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
 using Ledgerline.Contracts.Risk;
@@ -17,6 +18,7 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
     private static readonly Counter<long> ManualReviews = Meter.CreateCounter<long>("ledgerline.saga.manual_review");
     private bool transitioned;
     private bool manualReview;
+    private Guid? lastCommandMessageId;
 
     public async Task StartAsync(Payment payment, CancellationToken ct = default)
     {
@@ -77,6 +79,7 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
         payment.UpdatedAt = clock.UtcNow;
         db.SagaSteps.Add(new SagaStepRow { PaymentId = payment.Id, Step = auditedStep ?? decision.Step, Outcome = outcome,
             Detail = decision.FailureReason, At = clock.UtcNow });
+        lastCommandMessageId = null;
         foreach (var effect in decision.Effects) await ApplyEffectAsync(payment, effect, context, ct);
         await db.SaveChangesAsync(ct);
         transitioned = true;
@@ -94,12 +97,13 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
             case SagaEffect.ScheduleTimeout timeout:
                 var after = timeout.Step switch
                 {
-                    SagaStep.LedgerCredit or SagaStep.LedgerTransfer or SagaStep.LedgerReserve or SagaStep.LedgerCapture or SagaStep.LedgerRelease =>
+                    SagaStep.RiskCheck or SagaStep.LedgerCredit or SagaStep.LedgerTransfer or SagaStep.LedgerReserve or SagaStep.LedgerCapture or SagaStep.LedgerRelease =>
                         TimeSpan.FromMilliseconds(timeoutOptions.StepTimeoutMs),
                     SagaStep.BankVoid or SagaStep.BankRefund when timeoutOptions.CompensationTimeoutMs is { } milliseconds => TimeSpan.FromMilliseconds(milliseconds),
                     _ => timeout.After
                 };
-                db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step, DueAt = clock.UtcNow + after });
+                db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step,
+                    DueAt = clock.UtcNow + after, DurationMs = checked((int)after.TotalMilliseconds), CommandMessageId = lastCommandMessageId });
                 break;
             default:
                 PublishEffect(payment.Id, effect, context?.MessageId);
@@ -145,6 +149,7 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
 
     private void EnqueueCommand(Guid paymentId, object message, Guid? causationId)
     {
+        var existing = db.ChangeTracker.Entries<OutboxMessage>().Select(x => x.Entity.MessageId).ToHashSet();
         switch (message)
         {
             case CreditTopUp command:
@@ -170,6 +175,7 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
                 break;
             default: throw new NotSupportedException("The saga emitted an unsupported command.");
         }
+        lastCommandMessageId = db.ChangeTracker.Entries<OutboxMessage>().Single(x => !existing.Contains(x.Entity.MessageId)).Entity.MessageId;
     }
 
     private void EnqueueEvent(Guid paymentId, object value, Guid? causationId)

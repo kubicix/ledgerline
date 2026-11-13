@@ -554,7 +554,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T17: Timeouts complete: attempt accounting during outages
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.6 and 9 (last paragraph). **Depends:** M2-T13.
 **Files:** Modify `Sagas/SagaTimeoutPoller.cs`, `Sagas/SagaRunner.cs` (store the `message_id` of the last command sent for the step on the payment or timeout row). Test `tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs` (extend).

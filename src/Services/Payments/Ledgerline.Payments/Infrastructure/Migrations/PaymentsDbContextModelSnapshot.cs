@@ -394,9 +394,17 @@ namespace Ledgerline.Payments.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("CommandMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("command_message_id");
+
                     b.Property<DateTimeOffset>("DueAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_ms");
 
                     b.Property<Guid>("PaymentId")
                         .HasColumnType("uuid")

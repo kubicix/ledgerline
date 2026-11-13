@@ -1,4 +1,5 @@
 using Ledgerline.BuildingBlocks.Messaging;
+using Ledgerline.BuildingBlocks.Messaging.Outbox;
 using Ledgerline.Payments.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
@@ -40,6 +41,12 @@ public sealed partial class SagaTimeoutPoller(IServiceScopeFactory scopes, Timeo
             ORDER BY due_at LIMIT 1 FOR UPDATE SKIP LOCKED
             """).SingleOrDefaultAsync(ct);
         if (timeout is null) return;
+        if (await WaitForPublicationAsync(db, timeout, ct))
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
         crashPoint.Hit("saga.timeout-locked");
         var runner = scope.ServiceProvider.GetRequiredService<SagaRunner>();
         await runner.ApplyAsync(timeout.PaymentId, new SagaInput.StepTimedOut(timeout.Step), null, ct);
@@ -50,6 +57,21 @@ public sealed partial class SagaTimeoutPoller(IServiceScopeFactory scopes, Timeo
         }
         await transaction.CommitAsync(ct);
         runner.OnCommitted();
+    }
+
+    private static async Task<bool> WaitForPublicationAsync(PaymentsDbContext db, Infrastructure.Entities.SagaTimeout timeout, CancellationToken ct)
+    {
+        if (timeout.CommandMessageId is not { } id) return false;
+        var command = await db.Set<OutboxMessage>().AsNoTracking().SingleAsync(x => x.MessageId == id, ct);
+        var duration = TimeSpan.FromMilliseconds(timeout.DurationMs);
+        if (command.ProcessedAt is not { } published)
+        {
+            timeout.DueAt = DateTimeOffset.UtcNow + duration;
+            return true;
+        }
+        timeout.CommandMessageId = null;
+        timeout.DueAt = published + duration;
+        return timeout.DueAt > DateTimeOffset.UtcNow;
     }
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Saga timeout polling failed.")]

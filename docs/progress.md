@@ -5,9 +5,9 @@ Updated: 2026-11-13. Repository: https://github.com/kubicix/ledgerline.
 ## Current checkpoint
 
 - M1: complete, reviewed and merged through PR #1.
-- M2: 15 of 19 tasks committed. Task 16, Notifications, is in progress.
+- M2: 16 of 19 tasks committed. Task 17, publication-aware timeouts, is in progress.
 - M3 and subsequent milestones: not started.
-- Overall completed tasks: 40 of 82, approximately 49%. Completion of M2 will
+- Overall completed tasks: 41 of 82, 50%. Completion of M2 will
   bring this to 44 of 82, approximately 54%. These percentages count tasks equally;
   they do not estimate effort or production readiness.
 
@@ -22,7 +22,7 @@ pausing. Do not start M3 without a new instruction.
   - [x] T06-T07: BankSimulator operations, failures and settlements.
   - [x] T08-T11: pure sagas, holds, refunds, account status and trial balance.
   - [x] T12-T15: bank client, full top-up, merchant payments and refund runtime.
-  - [ ] T16: Notifications and SMTP delivery.
+  - [x] T16: Notifications and SMTP delivery.
   - [ ] T17: publication-aware saga timeouts.
   - [ ] T18: Gateway.
   - [ ] T19: Compose, architecture and end-to-end verification.
@@ -43,7 +43,7 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
    `codex/milestone-2` in the existing managed worktree; its directory still has
    the historical `milestone-1` name.
 3. The M2 base is `e5843e970f76e3bf1b88ddfbe985b74e1f8dfa55`. The last completed
-   task at this checkpoint is T15, commit `70eb2cf`.
+   task at this checkpoint is T16, commit `0a7b5f7`.
 4. During active execution, `.superpowers/sdd/plan/progress.md` contains task
    evidence and rulings. Trust committed completion records over remembered
    context. Do not redo completed tasks.
@@ -55,8 +55,9 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
 
 ## Most recent verified gates
 
-After T15: Payments integration 60/60, Payments pure tests 159/159, contract
-samples 22/22, and solution build with zero warnings and errors. These are
+After T15-T16: Payments integration 60/60, Payments pure tests 159/159, contract
+samples 22/22, Notifications integration 10/10, Notifications templates 9/9,
+and solution build with zero warnings and errors. These are
 subsystem results, not the final M2 whole-solution verification.
 
 Useful verification commands:
