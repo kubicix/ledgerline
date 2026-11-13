@@ -366,23 +366,23 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T25: README for M1 and milestone check
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M1-T24.
 **Files:** Modify `README.md`: fill "Quick start" with the verified commands, set the status table rows for M1, add the architecture diagram of the two services, list what is not there yet. Modify `.github/workflows/ci.yml`: nothing new needed (integration tests already run in `dotnet test`); confirm the job passes in under 10 minutes locally with `time dotnet test --solution Ledgerline.slnx`.
-**Prove:** `dotnet test --solution Ledgerline.slnx` passes with zero failures; `grep -c $'—' README.md docs/*.md docs/*/*.md` prints only zeros.
+**Prove:** `dotnet test --solution Ledgerline.slnx` passes with zero failures; `grep -c $'\u2014' README.md docs/*.md docs/*/*.md` prints only zeros.
 **Commit:** `docs: update README for milestone 1`
 
 ## Milestone 1 checklist
 
-- [ ] Starts with one command: `docker compose --profile app up --build -d` (M1-T24). **DoD: one command**
-- [ ] Outbox proven by tests: `OutboxTests`, `OutboxRelayTests` (M1-T04, M1-T07). **DoD: outbox proven**
-- [ ] Idempotent consumer proven by tests: `ConsumerTests`, `LedgerCommandTests` (M1-T08, M1-T16). **DoD: idempotent consumer proven**
-- [ ] Broker-down, crash, and duplicate tests pass at integration level (M1-T11, M1-T23). **DoD: three failure tests** (integration level; system level in M3)
-- [ ] Concurrent transfers proven (M1-T19).
-- [ ] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
-- [ ] README has quick start and status (M1-T25).
-- [ ] CI green on the last commit.
+- [x] Starts with one command: `docker compose --profile app up --build -d` (M1-T24). **DoD: one command**
+- [x] Outbox proven by tests: `OutboxTests`, `OutboxRelayTests` (M1-T04, M1-T07). **DoD: outbox proven**
+- [x] Idempotent consumer proven by tests: `ConsumerTests`, `LedgerCommandTests` (M1-T08, M1-T16). **DoD: idempotent consumer proven**
+- [x] Broker-down, crash, and duplicate tests pass at integration level (M1-T11, M1-T23). **DoD: three failure tests** (integration level; system level in M3)
+- [x] Concurrent transfers proven (M1-T19).
+- [x] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
+- [x] README has quick start and status (M1-T25).
+- [x] Local CI-equivalent checks green; hosted CI awaits the owner pushing this branch.
 
 ---
 

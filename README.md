@@ -1,8 +1,8 @@
 # Ledgerline
 
-A payment and wallet backend built as .NET 10 microservices: an event-sourced
-double-entry ledger, payment sagas with compensation, a hand-rolled outbox and inbox
-on RabbitMQ, and tests that prove no money is lost when things fail.
+A payment and wallet backend built as .NET 10 microservices. Milestone 1 implements
+an event-sourced double-entry ledger, transfer and simple top-up sagas, a hand-rolled
+outbox and inbox on RabbitMQ, and integration tests for concurrency and recovery.
 
 > **What this is and is not.** A portfolio project that demonstrates concepts:
 > idempotency, double-entry bookkeeping, sagas, reconciliation. It moves no real
@@ -15,32 +15,49 @@ on RabbitMQ, and tests that prove no money is lost when things fail.
 | Milestone | Scope | State |
 |---|---|---|
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
-| M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Not started |
+| M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Not started |
 | M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
 
-Today the repository contains the documents and a walking skeleton: every project
-exists and builds, the infrastructure starts, CI runs. There is no business logic yet.
+Accounts and Payments run together today. The remaining service projects are walking
+skeletons. Bank operations, risk checks, compensation, refunds, the gateway, OIDC,
+application telemetry, Kubernetes and the UI arrive in later milestones. Redis,
+Keycloak and the observability containers are provisioned but not used by M1 logic.
 
 ## Quick start
 
-Requirements: Docker with Compose v2. The .NET 10 SDK only if you want to build or
-test from source.
+Requirements: Docker with Compose v2 or later. The Bash smoke script uses curl and
+standard shell utilities; Windows users can use the PowerShell script instead.
+The .NET 10 SDK is needed only to build or test from source.
 
 ```bash
-# Today: infrastructure only (PostgreSQL, RabbitMQ, Redis, Keycloak, Grafana LGTM, Mailpit)
-docker compose up -d
+docker compose --profile app up --build -d --wait
+./scripts/smoke.sh
+# SMOKE OK: alice=7500 bob=2500
 
-# From M1 on: the whole system
-# docker compose --profile app up --build -d
-# ./scripts/smoke.sh
+docker compose --profile app down
 ```
+
+PowerShell: run the same Compose command, then `./scripts/smoke.ps1`, and the same
+shutdown command. Both scripts create fresh synthetic users and wallets, top up
+10,000 minor units, transfer 2,500 and verify the final balances. Local data survives
+`down`. To run infrastructure alone, use `docker compose up -d`.
+
+Compose runs migration jobs before starting each application. Applications run as
+non-root users and expose anonymous `/health/live` and `/health/ready` endpoints;
+readiness checks their own database and RabbitMQ connection.
+
+M1 uses development headers (`X-Dev-User`, `X-Dev-Roles`, optional `X-Dev-Email`),
+accepted only in Development or Testing. POST requests require `Idempotency-Key`.
+This local authentication mode is replaced by OIDC in M2.
 
 | What | URL | Credentials (local development only) |
 |---|---|---|
+| Accounts API | http://localhost:5101 | Development headers |
+| Payments API | http://localhost:5102 | Development headers |
 | API gateway (from M2) | http://localhost:8080 | Keycloak tokens |
 | Keycloak | http://localhost:8081 | `admin` / `ledgerline_dev` |
 | RabbitMQ management | http://localhost:15672 | `ledgerline` / `ledgerline_dev` |
@@ -56,18 +73,36 @@ dotnet test --solution Ledgerline.slnx
 
 ## Architecture
 
-_Placeholder: container diagram image exported from `docs/design.md` (M2-T19)._
+```mermaid
+flowchart LR
+    Client -->|HTTP: wallets and entries| Accounts
+    Client -->|HTTP: top-ups and transfers| Payments
+    Accounts -->|events and replies via outbox| RabbitMQ
+    RabbitMQ -->|account replica and ledger replies via inbox| Payments
+    Payments -->|ledger commands via outbox| RabbitMQ
+    RabbitMQ -->|ledger commands via inbox| Accounts
+    Accounts --- AccountsDB[(accounts_db)]
+    Payments --- PaymentsDB[(payments_db)]
+    RabbitMQ --> LocalEvents[(local.events)]
+```
+
+The Compose `rabbitmq-init` job declares `local.events`, a durable quorum queue
+bound to events from the two M1 exchanges. It retains events whose business consumers
+arrive in later milestones, so mandatory publication can complete. It does not
+consume commands or replay events to future services. The queue retains local demo
+history; it is not a production retention policy.
 
 Short version:
 
 - **Accounts and Ledger** is the only writer of money. Append-only event store,
   double-entry journal, balances as projections.
-- **Payments** orchestrates each payment as a saga across Risk, the bank, and the
-  ledger, and compensates when a later step fails.
-- **Risk** applies limits and velocity checks. **Notifications** sends emails.
+- **Payments** currently orchestrates ledger credit and transfer steps, including
+  retries and `ManualReview` after five unanswered attempts. Risk, bank steps and
+  compensation are planned for M2.
+- **Risk** and **Notifications** are planned M2 services.
 - Services own their databases and talk only through RabbitMQ. Every outgoing message
   goes through a transactional outbox; every consumer deduplicates through an inbox.
-- **Gateway** (YARP) is the single entry point. **Keycloak** issues tokens.
+- **Gateway** (YARP) and Keycloak authentication are planned for M2.
 
 Full design: [docs/design.md](docs/design.md). Per-service specs: [docs/specs](docs/specs).
 
