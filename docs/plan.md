@@ -433,7 +433,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T05: Velocity windows in Redis with database fallback, Risk admin API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` section 4 step 3, section 5, section 8. **Depends:** M2-T04, M2-T01.
 **Files:** Create in Risk `Features/Evaluate/RedisVelocityCounter.cs` (Lua script as an embedded string), `Features/Evaluate/FallbackVelocityCounter.cs` (tries Redis, falls back), `Features/Rules/{ListRulesEndpoint.cs,UpdateRuleEndpoint.cs,GetDecisionEndpoint.cs}`. Test `tests/Ledgerline.Risk.IntegrationTests/{VelocityTests.cs,RiskApiTests.cs}`.

@@ -21,7 +21,7 @@ public sealed class EvaluateRiskHandler(RiskDbContext db, RuleCache cache, IVelo
         if (existing is not null) { Reply(existing, context); return; }
         var rules = await cache.GetAsync(db, ct);
         var window = rules.Where(x => x.Code == RuleCode.VelocityLimit).Select(x => x.WindowSeconds!.Value).DefaultIfEmpty(60).Max();
-        var count = await velocity.CountAsync(message.CustomerId, message.PaymentId, clock.UtcNow, window, ct);
+        var count = await velocity.CountAsync(message.CustomerId, message.PaymentId, message.RequestedAt, window, ct);
         var request = new RiskRequest(message.PaymentId, message.Kind, message.CustomerId, message.AccountId,
             message.AmountMinor, message.Currency, message.RequestedAt);
         var result = RiskEvaluator.Evaluate(rules, request, new(total.TotalMinor, count));

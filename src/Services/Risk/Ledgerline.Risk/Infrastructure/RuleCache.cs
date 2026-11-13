@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.Risk.Infrastructure;
 
-public sealed partial class RuleCache(IClock clock, ILogger<RuleCache> logger)
+public sealed partial class RuleCache(IClock clock, ILogger<RuleCache> logger, TimeSpan? ttl = null)
 {
     private CacheEntry? current;
 
@@ -20,7 +20,7 @@ public sealed partial class RuleCache(IClock clock, ILogger<RuleCache> logger)
                 Misconfigured(logger, entity.Id);
             else rules.Add(entity.ToRule());
         }
-        Volatile.Write(ref current, new(rules, clock.UtcNow.AddSeconds(10)));
+        Volatile.Write(ref current, new(rules, clock.UtcNow.Add(ttl ?? TimeSpan.FromSeconds(10))));
         return rules;
     }
 
