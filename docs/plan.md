@@ -463,7 +463,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T08: Saga core: top-up with bank steps and compensation (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.1 (T1 to T10), 4.6. **Depends:** M1-T20, M2-T04.
 **Files:** Modify `Sagas/PaymentSaga.cs`, `Sagas/SagaInput.cs`; create `src/Contracts/Ledgerline.Contracts/Payments/CallBank.cs` plus sample. Test `tests/Ledgerline.Payments.Tests/TopUpSagaTests.cs`.
