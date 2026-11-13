@@ -15,6 +15,22 @@ namespace Ledgerline.BuildingBlocks.Tests;
 
 public sealed class WebDefaultsTests
 {
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{\"accountId\":\"not-a-guid\",\"amountMinor\":1}")]
+    [InlineData("{\"accountId\":\"00000000-0000-0000-0000-000000000001\",\"amountMinor\":9223372036854775808}")]
+    public async Task Development_binding_errors_return_validation_problem(string json)
+    {
+        await using var app = await CreateAppAsync(environment: "Development");
+        using var client = app.GetTestClient();
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync("/binding", content, TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        problem.GetProperty("type").GetString().ShouldBe("urn:ledgerline:problem:validation-failed");
+        problem.GetProperty("traceId").GetString().ShouldNotBeNullOrWhiteSpace();
+    }
+
     [Fact]
     public async Task Unhandled_exception_becomes_problem_details_with_trace_id()
     {
@@ -89,9 +105,9 @@ public sealed class WebDefaultsTests
         user.GetProperty("customer").GetBoolean().ShouldBeTrue();
     }
 
-    private static async Task<WebApplication> CreateAppAsync(MutableCheck? check = null)
+    private static async Task<WebApplication> CreateAppAsync(MutableCheck? check = null, string environment = "Testing")
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:Mode"] = "DevHeaders" });
         builder.AddLedgerlineWebDefaults("test");
@@ -99,11 +115,14 @@ public sealed class WebDefaultsTests
         var app = builder.Build();
         app.UseLedgerlineWebDefaults();
         app.MapGet("/boom", (Func<IResult>)(() => throw new InvalidOperationException("private failure")));
+        app.MapPost("/binding", (BindingRequest request) => Results.Ok(request));
         app.MapGet("/customer", () => Results.Ok()).RequireAuthorization(Policies.Customer);
         app.MapGet("/me", (ICurrentUser user) => Results.Ok(new { user.Id, user.Email, Customer = user.IsInRole("customer") })).RequireAuthorization();
         await app.StartAsync(TestContext.Current.CancellationToken);
         return app;
     }
+
+    public sealed record BindingRequest(Guid AccountId, long AmountMinor);
 
     private sealed class MutableCheck : IHealthCheck
     {

@@ -12,6 +12,39 @@ namespace Ledgerline.Accounts.IntegrationTests;
 public sealed class MigrationTests(InfrastructureFixture infrastructure)
 {
     [Fact]
+    public async Task Runtime_owner_can_append_but_cannot_update_or_delete_events()
+    {
+        var role = "app_" + Guid.NewGuid().ToString("N");
+        var database = "grants_" + Guid.NewGuid().ToString("N");
+        await using var admin = new NpgsqlConnection(infrastructure.PostgresAdminConnectionString);
+        await admin.OpenAsync(TestContext.Current.CancellationToken);
+        await using (var createRole = new NpgsqlCommand($"CREATE ROLE \"{role}\" LOGIN PASSWORD 'synthetic_test_only'", admin))
+            await createRole.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        await using (var createDatabase = new NpgsqlCommand($"CREATE DATABASE \"{database}\" OWNER \"{role}\"", admin))
+            await createDatabase.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        var cs = new NpgsqlConnectionStringBuilder(infrastructure.PostgresAdminConnectionString)
+        {
+            Database = database, Username = role, Password = "synthetic_test_only", Pooling = false
+        }.ConnectionString;
+        await MigrateCommand.RunAsync(cs, TestContext.Current.CancellationToken);
+        await MigrateCommand.RunAsync(cs, TestContext.Current.CancellationToken);
+        await using var runtime = new NpgsqlConnection(cs);
+        await runtime.OpenAsync(TestContext.Current.CancellationToken);
+        foreach (var sql in new[] { "UPDATE events SET type=type WHERE false", "DELETE FROM events WHERE false", "TRUNCATE events" })
+        {
+            await using var mutation = new NpgsqlCommand(sql, runtime);
+            var error = await Should.ThrowAsync<PostgresException>(() => mutation.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
+            error.SqlState.ShouldBe("42501");
+        }
+        await using var append = new NpgsqlCommand("""
+            INSERT INTO events(stream_id,version,type,data,metadata,occurred_at)
+            VALUES (@id,1,'synthetic.v1','{}','{}',now()); SELECT count(*) FROM events
+            """, runtime);
+        append.Parameters.AddWithValue("id", Guid.NewGuid());
+        ((long)(await append.ExecuteScalarAsync(TestContext.Current.CancellationToken))!).ShouldBe(7);
+    }
+
+    [Fact]
     public async Task Migration_creates_all_tables_from_spec()
     {
         var cs = await CreateDatabaseAsync();
@@ -70,7 +103,7 @@ public sealed class MigrationTests(InfrastructureFixture infrastructure)
         await using var db = OpenDb(cs);
         (await db.Accounts.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(6);
         (await db.Events.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(6);
-        (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).Count().ShouldBe(1);
+        (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).Count().ShouldBe(2);
     }
 
     [Fact]

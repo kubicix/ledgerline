@@ -87,10 +87,14 @@ flowchart LR
 ```
 
 The Compose `rabbitmq-init` job declares `local.events`, a durable quorum queue
-bound to events from the two M1 exchanges. It retains events whose business consumers
-arrive in later milestones, so mandatory publication can complete. It does not
+bound to journal-entry-posted, payment-completed and payment-failed events. It retains
+events whose business consumers arrive in later milestones, so mandatory publication
+can complete. It does not
 consume commands or replay events to future services. The queue retains local demo
 history; it is not a production retention policy.
+
+Account replication and ledger replies retain their normal mandatory routing: if
+the required consumer has not started yet, the event stays in the outbox for retry.
 
 Short version:
 

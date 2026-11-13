@@ -75,8 +75,11 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
                 envelope is null ? "invalid-envelope" : "unknown-type", ct);
             return;
         }
-        var attempt = delivery.BasicProperties.Headers?.TryGetValue("x-ledgerline-attempt", out var value) == true
-            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 1;
+        if (!ReadAttempt(delivery.BasicProperties.Headers, out var attempt))
+        {
+            await ForwardSafelyAsync(channel, delivery, Topology.DeadQueue(options.Service), 1, "invalid-attempt", ct);
+            return;
+        }
         try
         {
             await ProcessAsync(envelope, attempt, ct);
@@ -93,12 +96,28 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
         }
     }
 
+    private static bool ReadAttempt(IDictionary<string, object?>? headers, out int attempt)
+    {
+        attempt = 1;
+        if (headers?.TryGetValue("x-ledgerline-attempt", out var value) != true) return true;
+        attempt = value switch
+        {
+            byte number => number,
+            short number => number,
+            int number => number,
+            long number when number is > 0 and <= int.MaxValue => (int)number,
+            _ => 0
+        };
+        return attempt > 0;
+    }
+
     private static MessageEnvelope? ReadEnvelope(ReadOnlyMemory<byte> body)
     {
         try
         {
             var envelope = EnvelopeSerializer.Deserialize(body.Span);
-            return string.IsNullOrEmpty(envelope.Type) || envelope.Payload.ValueKind == JsonValueKind.Undefined ? null : envelope;
+            return envelope.MessageId == Guid.Empty || envelope.CorrelationId == Guid.Empty
+                || string.IsNullOrWhiteSpace(envelope.Type) || envelope.Payload.ValueKind == JsonValueKind.Undefined ? null : envelope;
         }
         catch (JsonException) { return null; }
     }

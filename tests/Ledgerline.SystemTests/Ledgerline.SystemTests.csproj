@@ -1,2 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
+    <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+    <ProjectReference Include="../../src/Services/Payments/Ledgerline.Payments/Ledgerline.Payments.csproj" />
+    <None Include="../../deploy/compose/rabbitmq/local-events.json" Link="local-events.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

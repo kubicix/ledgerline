@@ -28,6 +28,8 @@ public static class WebDefaults
                 context.ProblemDetails.Type = "urn:ledgerline:problem:" + ProblemCodes.ForStatus(status);
             context.ProblemDetails.Detail ??= context.ProblemDetails.Title;
         });
+        builder.Services.AddExceptionHandler(options => options.StatusCodeSelector = error =>
+            error is BadHttpRequestException requestError ? requestError.StatusCode : StatusCodes.Status500InternalServerError);
         builder.Services.AddAuthentication(DevHeaderAuthenticationHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, DevHeaderAuthenticationHandler>(DevHeaderAuthenticationHandler.SchemeName, _ => { });
         builder.Services.AddAuthorizationBuilder()

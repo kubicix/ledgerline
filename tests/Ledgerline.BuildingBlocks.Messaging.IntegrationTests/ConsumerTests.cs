@@ -15,6 +15,70 @@ namespace Ledgerline.BuildingBlocks.Messaging.IntegrationTests;
 public sealed class ConsumerTests(InfrastructureFixture infrastructure)
 {
     [Fact]
+    public async Task Malformed_attempt_headers_dead_letter_without_stalling_prefetch_one()
+    {
+        var (cs, ids) = await CreateDatabaseAsync(1);
+        var service = "headers" + Ids.New().ToString("N");
+        using var host = CreateHost(cs, service, prefetch: 1);
+        await host.StartAsync(TestContext.Current.CancellationToken);
+        await WaitConsumersAsync(service, 1);
+        await using var connection = new RabbitMqConnection(new RabbitMqOptions { Uri = infrastructure.RabbitMqUri });
+        await using var channel = await connection.CreateChannelAsync(true, TestContext.Current.CancellationToken);
+        object[] invalid = ["garbage", System.Text.Encoding.UTF8.GetBytes("1"), long.MaxValue, 0, -1, true];
+        foreach (var header in invalid)
+            await PublishDeliveryAsync(channel, service, ids[0], "bad", header, omitIdentity: false);
+        await PublishDeliveryAsync(channel, service, ids[0], "renamed", 1, omitIdentity: false);
+        var reasons = new List<string>();
+        await Eventually.ShouldAsync(async () =>
+        {
+            var dead = await channel.BasicGetAsync(Topology.DeadQueue(service), true, TestContext.Current.CancellationToken);
+            if (dead is not null) reasons.Add(System.Text.Encoding.UTF8.GetString((byte[])dead.BasicProperties.Headers!["x-ledgerline-dead-reason"]!));
+            return reasons.Count == invalid.Length;
+        });
+        reasons.ShouldAllBe(reason => reason == "invalid-attempt");
+        await Eventually.ShouldAsync(async () => await InboxCountAsync(cs) == 1);
+        await host.StopAsync(TestContext.Current.CancellationToken);
+        await AssertEffectsAsync(cs, ids);
+    }
+
+    [Fact]
+    public async Task Missing_message_identities_are_dead_lettered_without_business_effects()
+    {
+        var (cs, ids) = await CreateDatabaseAsync(2);
+        var service = "identities" + Ids.New().ToString("N");
+        using var host = CreateHost(cs, service, prefetch: 1);
+        await host.StartAsync(TestContext.Current.CancellationToken);
+        await WaitConsumersAsync(service, 1);
+        await using var connection = new RabbitMqConnection(new RabbitMqOptions { Uri = infrastructure.RabbitMqUri });
+        await using var channel = await connection.CreateChannelAsync(true, TestContext.Current.CancellationToken);
+        foreach (var id in ids) await PublishDeliveryAsync(channel, service, id, "bad", 1, omitIdentity: true);
+        var deadCount = 0;
+        await Eventually.ShouldAsync(async () =>
+        {
+            var dead = await channel.BasicGetAsync(Topology.DeadQueue(service), true, TestContext.Current.CancellationToken);
+            if (dead is not null) deadCount++;
+            return deadCount == 2;
+        });
+        await host.StopAsync(TestContext.Current.CancellationToken);
+        await using var db = OpenDb(cs);
+        (await db.Widgets.ToListAsync(TestContext.Current.CancellationToken)).ShouldAllBe(x => x.Name == "original");
+        (await db.Set<InboxMessage>().CountAsync(TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await db.Set<OutboxMessage>().CountAsync(TestContext.Current.CancellationToken)).ShouldBe(0);
+    }
+
+    private static async Task PublishDeliveryAsync(IChannel channel, string service, Guid widgetId,
+        string name, object attempt, bool omitIdentity)
+    {
+        var payload = EnvelopeSerializer.ToPayload(new RenameWidget(widgetId, name));
+        var body = omitIdentity
+            ? System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { type = "consumer.command.rename-widget.v1", occurredAt = DateTimeOffset.UtcNow, correlationId = widgetId, payload })
+            : EnvelopeSerializer.Serialize(new MessageEnvelope(Ids.New(), "consumer.command.rename-widget.v1", DateTimeOffset.UtcNow,
+                widgetId, null, null, payload));
+        var properties = new BasicProperties { Headers = new Dictionary<string, object?> { ["x-ledgerline-attempt"] = attempt } };
+        await channel.BasicPublishAsync("", Topology.InboxQueue(service), true, properties, body, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Message_is_handled_and_acknowledged()
     {
         var (cs, ids) = await CreateDatabaseAsync(1);
@@ -91,11 +155,11 @@ public sealed class ConsumerTests(InfrastructureFixture infrastructure)
         (await db.Set<OutboxMessage>().CountAsync(TestContext.Current.CancellationToken)).ShouldBe(0);
     }
 
-    private IHost CreateHost(string cs, string service, HandlerBehavior? behavior = null)
+    private IHost CreateHost(string cs, string service, HandlerBehavior? behavior = null, ushort prefetch = 16)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(new RabbitMqConnection(new RabbitMqOptions { Uri = infrastructure.RabbitMqUri }));
-        builder.Services.AddSingleton(new ConsumerOptions { Service = service, Prefetch = 16 });
+        builder.Services.AddSingleton(new ConsumerOptions { Service = service, Prefetch = prefetch });
         builder.Services.AddSingleton<MessageTypeRegistry>();
         builder.Services.AddSingleton(sp => new HandlerRegistry(sp.GetRequiredService<MessageTypeRegistry>()).Add<RenameWidget, RenameWidgetHandler>());
         builder.Services.AddSingleton<IClock, SystemClock>();
