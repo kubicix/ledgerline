@@ -1,0 +1,14 @@
+{
+  "vhosts": [{ "name": "/" }],
+  "exchanges": [
+    { "name": "ledgerline.accounts", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "ledgerline.payments", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    { "name": "local.events", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } }
+  ],
+  "bindings": [
+    { "source": "ledgerline.accounts", "vhost": "/", "destination": "local.events", "destination_type": "queue", "routing_key": "accounts.event.#", "arguments": {} },
+    { "source": "ledgerline.payments", "vhost": "/", "destination": "local.events", "destination_type": "queue", "routing_key": "payments.event.#", "arguments": {} }
+  ]
+}

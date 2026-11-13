@@ -356,7 +356,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T24: Dockerfiles and the one command
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0005; `design.md` section 11 (migrations). **Depends:** M1-T21.
 **Files:** Create `src/Services/Accounts/Ledgerline.Accounts/Dockerfile`, `src/Services/Payments/Ledgerline.Payments/Dockerfile` (multi-stage, `mcr.microsoft.com/dotnet/sdk:10.0` and `aspnet:10.0`, non-root user, build context = repository root), `.dockerignore`; modify `compose.yaml`: under profile `app` add `accounts-migrate`, `payments-migrate` (run `migrate`, `restart: "no"`), `accounts`, `payments` (depend on infrastructure `service_healthy` and their migrate job `service_completed_successfully`; environment variables for connection strings, RabbitMQ URI, `Auth__Mode=DevHeaders`, `ASPNETCORE_ENVIRONMENT=Development`; host ports 5101 and 5102; healthcheck on `/health/ready`). Create `scripts/smoke.sh` and `scripts/smoke.ps1` (open two wallets with dev headers, top up 100.00, transfer 25.00, poll until `Completed`, print balances, exit non-zero on mismatch).

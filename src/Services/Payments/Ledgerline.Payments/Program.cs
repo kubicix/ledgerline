@@ -21,6 +21,7 @@ if (command == "migrate")
     return;
 }
 builder.AddLedgerlineWebDefaults("payments");
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
