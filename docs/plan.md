@@ -132,7 +132,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T04: Outbox and inbox tables, IOutbox
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 5, 6; ADR 0003. **Depends:** M1-T02, M1-T03.
 **Files:** Create in Messaging project: `Outbox/OutboxMessage.cs`, `Outbox/IOutbox.cs`, `Outbox/EfOutbox.cs`, `Inbox/InboxMessage.cs`, `ModelBuilderExtensions.cs`. Add packages `Microsoft.EntityFrameworkCore` 10.0.15, `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3. Create `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Support/TestDbContext.cs` (one entity `Widget(Guid Id, string Name)`, calls `AddOutboxAndInbox()`, schema created with `EnsureCreated`). Test `OutboxTests.cs`.
