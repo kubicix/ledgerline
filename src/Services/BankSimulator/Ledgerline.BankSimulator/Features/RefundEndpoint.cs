@@ -14,6 +14,7 @@ public static class RefundEndpoint
             if (authorization.Status != "Captured") return BankIdempotency.Problem(http, 409, "invalid-state", "Refund requires Captured state");
             authorization.Status = "Refunded";
             var refundId = "ref_" + Guid.NewGuid().ToString("N");
-            return BankIdempotency.Response(200, new { refundId, status = "Refunded", refundedAt = DateTimeOffset.UtcNow }, authorization, refundId);
+            var refundedAt = BankIdempotency.Timestamp();
+            return BankIdempotency.Response(200, new { refundId, status = "Refunded", refundedAt }, authorization, refundId, refundedAt);
         }, ct);
 }

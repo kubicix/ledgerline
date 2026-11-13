@@ -453,7 +453,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T07: Bank Simulator: faults and settlement file
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `bank-simulator.md` section 3 (faults, settlement, tampering), section 5. **Depends:** M2-T06.
 **Files:** Create `Features/{FaultsEndpoint.cs,FaultState.cs,FaultMiddleware.cs,SettlementEndpoint.cs,SettlementTampering.cs}`. Test `FaultTests.cs`, `SettlementTests.cs`.

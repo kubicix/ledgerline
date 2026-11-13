@@ -21,19 +21,23 @@ public static class BankIdempotency
         var result = await operation();
         result.IdempotencyKey = key!;
         result.Kind = kind;
-        result.OccurredAt = DateTimeOffset.UtcNow;
+        if (result.OccurredAt == default) result.OccurredAt = Timestamp();
         db.Operations.Add(result);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return Results.Json(result.ResponseBody, statusCode: result.HttpStatus);
     }
 
-    internal static BankOperation Response(int status, object body, BankAuthorization? authorization = null, string? refundId = null) => new()
+    internal static BankOperation Response(int status, object body, BankAuthorization? authorization = null,
+        string? refundId = null, DateTimeOffset occurredAt = default) => new()
     {
         HttpStatus = status, ResponseBody = JsonSerializer.SerializeToElement(body, JsonSerializerOptions.Web),
         AuthorizationId = authorization?.Id, CaptureId = authorization?.CaptureId, RefundId = refundId,
-        Reference = authorization?.Reference, AmountMinor = authorization?.AmountMinor, Currency = authorization?.Currency
+        Reference = authorization?.Reference, AmountMinor = authorization?.AmountMinor, Currency = authorization?.Currency,
+        OccurredAt = occurredAt
     };
+
+    internal static DateTimeOffset Timestamp() => new(DateTimeOffset.UtcNow.UtcTicks / 10 * 10, TimeSpan.Zero);
 
     internal static BankOperation Problem(HttpContext http, int status, string code, string title) => Response(status, new
     {

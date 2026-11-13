@@ -11,11 +11,15 @@ public static class AuthorizeEndpoint
     public static void MapBankEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("").AddEndpointFilter<ApiKeyFilter>();
-        group.MapPost("/authorizations", HandleAsync);
-        group.MapPost("/authorizations/{id}/capture", CaptureEndpoint.HandleAsync);
-        group.MapPost("/authorizations/{id}/void", VoidEndpoint.HandleAsync);
-        group.MapPost("/captures/{id}/refund", RefundEndpoint.HandleAsync);
-        group.MapGet("/operations/{idempotencyKey}", LookupEndpoint.HandleAsync);
+        group.MapPost("/authorizations", HandleAsync).WithMetadata(new BankOperationMetadata("Authorize"));
+        group.MapPost("/authorizations/{id}/capture", CaptureEndpoint.HandleAsync).WithMetadata(new BankOperationMetadata("Capture"));
+        group.MapPost("/authorizations/{id}/void", VoidEndpoint.HandleAsync).WithMetadata(new BankOperationMetadata("Void"));
+        group.MapPost("/captures/{id}/refund", RefundEndpoint.HandleAsync).WithMetadata(new BankOperationMetadata("Refund"));
+        group.MapGet("/operations/{idempotencyKey}", LookupEndpoint.HandleAsync).WithMetadata(new BankOperationMetadata("Lookup"));
+        group.MapPut("/faults", FaultsEndpoint.Set);
+        group.MapDelete("/faults", FaultsEndpoint.Clear);
+        group.MapGet("/settlements/{date}", SettlementEndpoint.HandleAsync);
+        group.MapPut("/settlement-tampering", (SettlementTamperingRequest request, SettlementTampering tampering) => tampering.Set(request));
     }
 
     public static Task<IResult> HandleAsync(AuthorizeRequest request, HttpContext http, BankDbContext db, CancellationToken ct) =>

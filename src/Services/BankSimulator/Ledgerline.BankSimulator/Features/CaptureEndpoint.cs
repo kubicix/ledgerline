@@ -14,6 +14,7 @@ public static class CaptureEndpoint
                 return BankIdempotency.Response(402, new { status = "Declined", declineCode = "capture_declined" }, authorization);
             authorization.CaptureId = "cap_" + Guid.NewGuid().ToString("N");
             authorization.Status = "Captured";
-            return BankIdempotency.Response(200, new { captureId = authorization.CaptureId, status = "Captured", capturedAt = DateTimeOffset.UtcNow }, authorization);
+            var capturedAt = BankIdempotency.Timestamp();
+            return BankIdempotency.Response(200, new { captureId = authorization.CaptureId, status = "Captured", capturedAt }, authorization, occurredAt: capturedAt);
         }, ct);
 }

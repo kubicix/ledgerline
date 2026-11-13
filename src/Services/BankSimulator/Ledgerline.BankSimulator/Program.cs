@@ -13,11 +13,14 @@ if (migrate)
 }
 builder.AddLedgerlineWebDefaults("banksim");
 builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
+builder.Services.AddSingleton<FaultState>();
+builder.Services.AddSingleton<SettlementTampering>();
 builder.Services.AddDbContext<BankDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
+app.UseMiddleware<FaultMiddleware>();
 app.MapBankEndpoints();
 app.Run();
 
