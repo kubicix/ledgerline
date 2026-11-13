@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/BankSimulator/Ledgerline.BankSimulator/Ledgerline.BankSimulator.csproj" />
+  </ItemGroup>
+</Project>

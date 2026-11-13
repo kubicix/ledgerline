@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>

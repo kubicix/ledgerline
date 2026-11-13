@@ -1,0 +1,44 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
+    <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
+  </Folder>
+  <Folder Name="/src/Contracts/">
+    <Project Path="src/Contracts/Ledgerline.Contracts/Ledgerline.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/Gateway/">
+    <Project Path="src/Gateway/Ledgerline.Gateway/Ledgerline.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Accounts/">
+    <Project Path="src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/BankSimulator/">
+    <Project Path="src/Services/BankSimulator/Ledgerline.BankSimulator/Ledgerline.BankSimulator.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Notifications/">
+    <Project Path="src/Services/Notifications/Ledgerline.Notifications/Ledgerline.Notifications.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Payments/">
+    <Project Path="src/Services/Payments/Ledgerline.Payments/Ledgerline.Payments.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Risk/">
+    <Project Path="src/Services/Risk/Ledgerline.Risk/Ledgerline.Risk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ledgerline.Accounts.IntegrationTests/Ledgerline.Accounts.IntegrationTests.csproj" />
+    <Project Path="tests/Ledgerline.Accounts.Tests/Ledgerline.Accounts.Tests.csproj" />
+    <Project Path="tests/Ledgerline.ArchitectureTests/Ledgerline.ArchitectureTests.csproj" />
+    <Project Path="tests/Ledgerline.BankSimulator.Tests/Ledgerline.BankSimulator.Tests.csproj" />
+    <Project Path="tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests.csproj" />
+    <Project Path="tests/Ledgerline.BuildingBlocks.Tests/Ledgerline.BuildingBlocks.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Gateway.Tests/Ledgerline.Gateway.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Notifications.Tests/Ledgerline.Notifications.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Payments.IntegrationTests/Ledgerline.Payments.IntegrationTests.csproj" />
+    <Project Path="tests/Ledgerline.Payments.Tests/Ledgerline.Payments.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Risk.Tests/Ledgerline.Risk.Tests.csproj" />
+    <Project Path="tests/Ledgerline.SystemTests/Ledgerline.SystemTests.csproj" />
+  </Folder>
+</Solution>

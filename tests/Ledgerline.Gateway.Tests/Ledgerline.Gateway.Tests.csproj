@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Gateway/Ledgerline.Gateway/Ledgerline.Gateway.csproj" />
+  </ItemGroup>
+</Project>

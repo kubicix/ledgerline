@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Risk/Ledgerline.Risk/Ledgerline.Risk.csproj" />
+  </ItemGroup>
+</Project>

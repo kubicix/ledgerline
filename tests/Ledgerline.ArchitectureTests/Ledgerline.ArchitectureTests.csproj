@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+    <ProjectReference Include="../../src/Services/Payments/Ledgerline.Payments/Ledgerline.Payments.csproj" />
+    <ProjectReference Include="../../src/Services/Risk/Ledgerline.Risk/Ledgerline.Risk.csproj" />
+    <ProjectReference Include="../../src/Services/Notifications/Ledgerline.Notifications/Ledgerline.Notifications.csproj" />
+    <ProjectReference Include="../../src/Services/BankSimulator/Ledgerline.BankSimulator/Ledgerline.BankSimulator.csproj" />
+    <ProjectReference Include="../../src/Gateway/Ledgerline.Gateway/Ledgerline.Gateway.csproj" />
+  </ItemGroup>
+</Project>
