@@ -302,7 +302,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T19: Ledger concurrency proofs and projection rebuild
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F4 (first three rows) and F5 last row; `accounts.md` section 10. **Depends:** M1-T16.
 **Files:** Create in Accounts `Infrastructure/RebuildProjectionsCommand.cs`; modify `Program.cs` (`rebuild-projections` argument). Test `tests/Ledgerline.Accounts.IntegrationTests/{ConcurrencyTests.cs,RebuildTests.cs}`.

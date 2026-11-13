@@ -7,13 +7,20 @@ using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.Contracts.Accounts;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
+var command = args.FirstOrDefault();
+var builder = WebApplication.CreateBuilder(command is "migrate" or "rebuild-projections" ? args[1..] : args);
 if (args.FirstOrDefault() == "migrate")
 {
     var connectionString = builder.Configuration.GetConnectionString("Database")
         ?? throw new InvalidOperationException("ConnectionStrings:Database is required.");
     var currencies = builder.Configuration.GetSection("Ledger:Currencies").Get<string[]>() ?? ["TRY", "EUR", "USD"];
     await MigrateCommand.RunAsync(connectionString, currencies);
+    return;
+}
+if (command == "rebuild-projections")
+{
+    await RebuildProjectionsCommand.RunAsync(builder.Configuration.GetConnectionString("Database")
+        ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
     return;
 }
 builder.AddLedgerlineWebDefaults("accounts");

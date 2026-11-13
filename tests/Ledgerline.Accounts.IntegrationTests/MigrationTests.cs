@@ -105,8 +105,32 @@ public sealed class MigrationTests(InfrastructureFixture infrastructure)
         response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AccountsDbContext>();
-        db.Database.GetConnectionString().ShouldBe(host.ConnectionString);
+        db.Database.GetDbConnection().Database.ShouldBe(new NpgsqlConnectionStringBuilder(host.ConnectionString).Database);
         (await db.Accounts.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task Disposed_service_host_releases_database_connections()
+    {
+        var host = await ServiceHost<Program>.StartAsync(infrastructure, "pool_lifetime");
+        var database = new NpgsqlConnectionStringBuilder(host.ConnectionString).Database!;
+        var dataSource = host.Services.GetRequiredService<NpgsqlDataSource>();
+        try
+        {
+            await Eventually.ShouldAsync(async () => await ConnectionsAsync(database) > 0);
+        }
+        finally { await host.DisposeAsync(); }
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await dataSource.OpenConnectionAsync());
+        await Eventually.ShouldAsync(async () => await ConnectionsAsync(database) == 0);
+    }
+
+    private async Task<long> ConnectionsAsync(string database)
+    {
+        await using var connection = new NpgsqlConnection(infrastructure.PostgresAdminConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_stat_activity WHERE datname=@database", connection);
+        command.Parameters.AddWithValue("database", database);
+        return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
     }
 
     private Task<string> CreateDatabaseAsync() => DatabaseFactory.CreateMigratedAsync<AccountsDbContext>(
