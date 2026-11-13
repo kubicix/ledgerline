@@ -382,7 +382,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 - [x] Concurrent transfers proven (M1-T19).
 - [x] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
 - [x] README has quick start and status (M1-T25).
-- [x] Local CI-equivalent checks green; hosted CI awaits the owner pushing this branch.
+- [x] M1 PR #1 and merged main passed hosted build-test; GitGuardian passed after development-credential triage.
 
 ---
 
@@ -390,7 +390,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T01: Keycloak realm and JWT authentication
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0004; `building-blocks.md` section 9 (Auth). **Depends:** M1 complete.
 **Files:** Modify `deploy/compose/keycloak/ledgerline-realm.json` (clients `ledgerline-api` bearer-only, `ledgerline-k6` with direct access grants; audience mapper adding `ledgerline-api` to tokens of `ledgerline-web` and `ledgerline-k6`; realm roles in the `roles` claim; users `alice`, `bob` (customer), `shop` (merchant), `admin` with emails `<name>@example.test` and development passwords). Create in Web: `Auth/JwtAuthExtensions.cs`, `Auth/ClaimsCurrentUser.cs`; delete `Auth/DevHeaderAuthenticationHandler.cs`. Add `Microsoft.AspNetCore.Authentication.JwtBearer` 10.0.15. Create `tests/Ledgerline.Testing/TestTokens.cs`; modify `ServiceHost.CreateClient` to send a bearer token. Modify `compose.yaml` service environments (`Auth__Authority=http://keycloak:8081/realms/ledgerline`, `Auth__Audience=ledgerline-api`, `Auth__RequireHttpsMetadata=false`). Modify `scripts/smoke.*` to obtain tokens from Keycloak through `ledgerline-k6`. Test: modify `tests/Ledgerline.BuildingBlocks.Tests/WebDefaultsTests.cs`.

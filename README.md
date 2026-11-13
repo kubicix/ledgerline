@@ -16,14 +16,14 @@ outbox and inbox on RabbitMQ, and integration tests for concurrency and recovery
 |---|---|---|
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
-| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Not started |
+| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | In progress: JWT authentication |
 | M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
 
 Accounts and Payments run together today. The remaining service projects are walking
-skeletons. Bank operations, risk checks, compensation, refunds, the gateway, OIDC,
+skeletons. Bank operations, risk checks, compensation, refunds, the gateway,
 application telemetry, Kubernetes and the UI arrive in later milestones. Redis,
 Keycloak and the observability containers are provisioned but not used by M1 logic.
 
@@ -42,7 +42,7 @@ docker compose --profile app down
 ```
 
 PowerShell: run the same Compose command, then `./scripts/smoke.ps1`, and the same
-shutdown command. Both scripts create fresh synthetic users and wallets, top up
+shutdown command. Both scripts use seeded synthetic users, open their wallets, top up
 10,000 minor units, transfer 2,500 and verify the final balances. Local data survives
 `down`. To run infrastructure alone, use `docker compose up -d`.
 
@@ -50,14 +50,16 @@ Compose runs migration jobs before starting each application. Applications run a
 non-root users and expose anonymous `/health/live` and `/health/ready` endpoints;
 readiness checks their own database and RabbitMQ connection.
 
-M1 uses development headers (`X-Dev-User`, `X-Dev-Roles`, optional `X-Dev-Email`),
-accepted only in Development or Testing. POST requests require `Idempotency-Key`.
-This local authentication mode is replaced by OIDC in M2.
+APIs validate Keycloak JWT bearer tokens with the `ledgerline-api` audience. POST
+requests require `Idempotency-Key`. The local realm seeds `alice` and `bob` as
+customers, `shop` as merchant, and `admin`; development passwords are `<name>_dev`.
+Smoke scripts obtain tokens through the development-only `ledgerline-k6` client and
+reuse stable idempotency keys so retained demo data can be checked repeatedly.
 
 | What | URL | Credentials (local development only) |
 |---|---|---|
-| Accounts API | http://localhost:5101 | Development headers |
-| Payments API | http://localhost:5102 | Development headers |
+| Accounts API | http://localhost:5101 | Keycloak bearer token |
+| Payments API | http://localhost:5102 | Keycloak bearer token |
 | API gateway (from M2) | http://localhost:8080 | Keycloak tokens |
 | Keycloak | http://localhost:8081 | `admin` / `ledgerline_dev` |
 | RabbitMQ management | http://localhost:15672 | `ledgerline` / `ledgerline_dev` |
@@ -106,7 +108,7 @@ Short version:
 - **Risk** and **Notifications** are planned M2 services.
 - Services own their databases and talk only through RabbitMQ. Every outgoing message
   goes through a transactional outbox; every consumer deduplicates through an inbox.
-- **Gateway** (YARP) and Keycloak authentication are planned for M2.
+- **Gateway** (YARP) is planned for M2; APIs already validate Keycloak tokens.
 
 Full design: [docs/design.md](docs/design.md). Per-service specs: [docs/specs](docs/specs).
 

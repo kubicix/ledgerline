@@ -4,9 +4,15 @@
   "sslRequired": "none",
   "roles": {
     "realm": [
-      { "name": "customer" },
-      { "name": "merchant" },
-      { "name": "admin" }
+      {
+        "name": "customer"
+      },
+      {
+        "name": "merchant"
+      },
+      {
+        "name": "admin"
+      }
     ]
   },
   "clients": [
@@ -17,9 +23,173 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["http://localhost:5100/*"],
-      "webOrigins": ["http://localhost:5100"],
-      "attributes": { "pkce.code.challenge.method": "S256" }
+      "redirectUris": [
+        "http://localhost:5100/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5100"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "protocolMapper": "oidc-audience-mapper",
+          "name": "ledgerline-api-audience",
+          "config": {
+            "id.token.claim": "false",
+            "included.client.audience": "ledgerline-api",
+            "access.token.claim": "true"
+          },
+          "consentRequired": false,
+          "protocol": "openid-connect"
+        },
+        {
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "name": "realm-roles",
+          "config": {
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "claim.name": "roles",
+            "multivalued": "true"
+          },
+          "consentRequired": false,
+          "protocol": "openid-connect"
+        }
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email"
+      ]
+    },
+    {
+      "enabled": true,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": false,
+      "clientId": "ledgerline-api"
+    },
+    {
+      "directAccessGrantsEnabled": true,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email"
+      ],
+      "enabled": true,
+      "standardFlowEnabled": false,
+      "protocolMappers": [
+        {
+          "protocolMapper": "oidc-audience-mapper",
+          "name": "ledgerline-api-audience",
+          "config": {
+            "id.token.claim": "false",
+            "included.client.audience": "ledgerline-api",
+            "access.token.claim": "true"
+          },
+          "consentRequired": false,
+          "protocol": "openid-connect"
+        },
+        {
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "name": "realm-roles",
+          "config": {
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "claim.name": "roles",
+            "multivalued": "true"
+          },
+          "consentRequired": false,
+          "protocol": "openid-connect"
+        }
+      ],
+      "clientId": "ledgerline-k6",
+      "publicClient": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "credentials": [
+        {
+          "temporary": false,
+          "value": "alice_dev",
+          "type": "password"
+        }
+      ],
+      "enabled": true,
+      "email": "alice@example.test",
+      "id": "00000000-0000-0000-0000-000000000101",
+      "emailVerified": true,
+      "realmRoles": [
+        "customer"
+      ],
+      "firstName": "Alice",
+      "lastName": "Demo"
+    },
+    {
+      "username": "bob",
+      "credentials": [
+        {
+          "temporary": false,
+          "value": "bob_dev",
+          "type": "password"
+        }
+      ],
+      "enabled": true,
+      "email": "bob@example.test",
+      "id": "00000000-0000-0000-0000-000000000102",
+      "emailVerified": true,
+      "realmRoles": [
+        "customer"
+      ],
+      "firstName": "Bob",
+      "lastName": "Demo"
+    },
+    {
+      "username": "shop",
+      "credentials": [
+        {
+          "temporary": false,
+          "value": "shop_dev",
+          "type": "password"
+        }
+      ],
+      "enabled": true,
+      "email": "shop@example.test",
+      "id": "00000000-0000-0000-0000-000000000103",
+      "emailVerified": true,
+      "realmRoles": [
+        "merchant"
+      ],
+      "firstName": "Shop",
+      "lastName": "Demo"
+    },
+    {
+      "username": "admin",
+      "credentials": [
+        {
+          "temporary": false,
+          "value": "admin_dev",
+          "type": "password"
+        }
+      ],
+      "enabled": true,
+      "email": "admin@example.test",
+      "id": "00000000-0000-0000-0000-000000000104",
+      "emailVerified": true,
+      "realmRoles": [
+        "admin"
+      ],
+      "firstName": "Admin",
+      "lastName": "Demo"
     }
   ]
 }

@@ -59,9 +59,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         if (userId is not null)
         {
-            client.DefaultRequestHeaders.Add("X-Dev-User", userId.Value.ToString());
-            client.DefaultRequestHeaders.Add("X-Dev-Roles", roles);
-            if (email is not null) client.DefaultRequestHeaders.Add("X-Dev-Email", email);
+            client.DefaultRequestHeaders.Authorization = new("Bearer", TestTokens.Create(userId.Value, roles, email));
         }
         return client;
     }
@@ -85,7 +83,10 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             {
                 ["ConnectionStrings:Database"] = cs,
                 ["Messaging:RabbitMq:Uri"] = rabbitMqUri,
-                ["Auth:Mode"] = "DevHeaders"
+                ["Auth:Mode"] = "TestKey",
+                ["Auth:Authority"] = TestTokens.Issuer,
+                ["Auth:Audience"] = "ledgerline-api",
+                ["Auth:TestSigningKey"] = TestTokens.SigningKey
             }));
             builder.ConfigureTestServices(services =>
             {

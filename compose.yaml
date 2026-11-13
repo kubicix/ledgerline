@@ -58,7 +58,10 @@ services:
     environment:
       ConnectionStrings__Database: Host=postgres;Database=accounts_db;Username=accounts;Password=accounts_dev
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
-      Auth__Mode: DevHeaders
+      Auth__Mode: Oidc
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
       ASPNETCORE_ENVIRONMENT: Development
     depends_on:
       postgres:
@@ -69,6 +72,8 @@ services:
         condition: service_completed_successfully
       rabbitmq-init:
         condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
     healthcheck: &app-health
       test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; head -n 1 <&3 | grep -q " 200 "']
       interval: 5s
@@ -86,7 +91,10 @@ services:
     environment:
       ConnectionStrings__Database: Host=postgres;Database=payments_db;Username=payments;Password=payments_dev
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
-      Auth__Mode: DevHeaders
+      Auth__Mode: Oidc
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
       ASPNETCORE_ENVIRONMENT: Development
     depends_on:
       postgres:
@@ -97,6 +105,8 @@ services:
         condition: service_completed_successfully
       rabbitmq-init:
         condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
     healthcheck: *app-health
 
   postgres:
@@ -110,7 +120,7 @@ services:
       - postgres-data:/var/lib/postgresql
       - ./deploy/compose/postgres/init-databases.sql:/docker-entrypoint-initdb.d/10-init-databases.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -152,10 +162,18 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-ledgerline_dev}
       KC_HTTP_PORT: "8081"
       KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
       - "8081:8081"
     volumes:
       - ./deploy/compose/keycloak/ledgerline-realm.json:/opt/keycloak/data/import/ledgerline-realm.json:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; IFS= read -r status <&3; [[ "$$status" == *" 200 "* ]]']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   # Grafana, Tempo, Loki, Prometheus and an OpenTelemetry Collector in one dev container.
   otel-lgtm:
