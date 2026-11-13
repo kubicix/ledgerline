@@ -503,7 +503,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T12: Payments: bank client and call-bank handler
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.5, invariant P8. **Depends:** M2-T07, M2-T08.
 **Files:** Create in Payments `Bank/{IBankClient.cs,BankClient.cs,BankResult.cs,BankOptions.cs}`, `Features/Bank/CallBankHandler.cs`; add `Microsoft.Extensions.Http.Resilience` 10.11.0 (timeout only, no retry for POST); modify `Program.cs`. Add a project reference from `Ledgerline.Payments.IntegrationTests` to `Ledgerline.BankSimulator` and host it with `ServiceHost<Ledgerline.BankSimulator.Program>`. Test `tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs`.

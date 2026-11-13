@@ -108,7 +108,7 @@ public static partial class PaymentSaga
         (PaymentStatus.Processing, SagaStep.BankAuthorize, SagaInput.BankAuthorized authorized) =>
             AddEffects(Send(payment, SagaStep.BankCapture, now, true), new SagaEffect.SetBankAuthorizationId(authorized.Id), new SagaEffect.ClearCardToken()),
         (PaymentStatus.Processing, SagaStep.BankAuthorize, SagaInput.BankDeclined declined) =>
-            Fail(payment, PaymentStatus.Failed, "BankDeclined:" + declined.Code, now),
+            AddEffects(Fail(payment, PaymentStatus.Failed, "BankDeclined:" + declined.Code, now), new SagaEffect.ClearCardToken()),
         (PaymentStatus.Processing, SagaStep.BankCapture, SagaInput.BankCaptured captured) =>
             AddEffects(Send(payment, SagaStep.LedgerCredit, now, true), new SagaEffect.SetBankCaptureId(captured.Id)),
         (PaymentStatus.Processing, SagaStep.BankCapture, SagaInput.BankCaptureDeclined declined) =>

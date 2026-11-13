@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using Ledgerline.BankSimulator.Infrastructure;
 using Ledgerline.BankSimulator.Infrastructure.Entities;
-using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.BuildingBlocks.Web.Problems;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,7 +12,8 @@ public static class BankIdempotency
     public static async Task<IResult> ExecuteAsync(HttpContext http, string kind, BankDbContext db,
         Func<Task<BankOperation>> operation, CancellationToken ct)
     {
-        if (!IdempotencyKey.TryRead(http, out var key)) return ProblemResults.IdempotencyKeyMissing();
+        var key = ReadKey(http.Request);
+        if (key is null) return ProblemResults.IdempotencyKeyMissing();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         var stored = await db.Operations.FindAsync([key], ct);
@@ -38,6 +38,13 @@ public static class BankIdempotency
     };
 
     internal static DateTimeOffset Timestamp() => new(DateTimeOffset.UtcNow.UtcTicks / 10 * 10, TimeSpan.Zero);
+
+    private static string? ReadKey(HttpRequest request)
+    {
+        var values = request.Headers["Idempotency-Key"];
+        if (values.Count != 1 || values[0] is not { Length: > 0 and <= 64 } key) return null;
+        return key.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or ':') ? key : null;
+    }
 
     internal static BankOperation Problem(HttpContext http, int status, string code, string title) => Response(status, new
     {

@@ -31,5 +31,6 @@ public sealed class Payment
     public uint Version { get; set; }
 
     public PaymentSnapshot Snapshot() => new(Id, Kind, Status, SagaStep, StepAttempt, CustomerId,
-        SourceAccountId, DestinationAccountId, AmountMinor, Currency, FailureReason);
+        SourceAccountId, DestinationAccountId, AmountMinor, Currency, FailureReason,
+        BankAuthorizationId, BankCaptureId, CreatedAt, CaptureMode, CaptureRequestedMinor, AuthorizationExpiresAt);
 }

@@ -10,7 +10,12 @@ using Ledgerline.Payments.Features.Topups;
 using Ledgerline.Payments.Features.Transfers;
 using Ledgerline.Payments.Infrastructure;
 using Ledgerline.Payments.Sagas;
+using Ledgerline.Payments.Bank;
+using Ledgerline.Payments.Features.Bank;
+using Ledgerline.Contracts.Payments;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Polly;
 
 var command = args.FirstOrDefault();
 var builder = WebApplication.CreateBuilder(command == "migrate" ? args[1..] : args);
@@ -25,11 +30,21 @@ builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", time
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
+builder.Services.AddSingleton(provider => provider.GetRequiredService<IConfiguration>().GetSection("Saga").Get<PaymentSagaOptions>() ?? new());
+builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
+builder.Services.AddHttpClient<IBankClient, BankClient>((provider, client) =>
+{
+    var options = provider.GetRequiredService<IOptions<BankOptions>>().Value;
+    client.BaseAddress = new Uri(options.BaseUrl);
+    client.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey);
+    client.Timeout = Timeout.InfiniteTimeSpan;
+}).AddResilienceHandler("bank-timeout", pipeline => pipeline.AddTimeout(TimeSpan.FromSeconds(5)));
 builder.Services.AddSingleton(services => services.GetRequiredService<IConfiguration>().GetSection("Saga:Timeouts").Get<TimeoutOptions>() ?? new());
 builder.Services.AddHostedService<SagaTimeoutPoller>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<SagaRunner>());
 builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration, messaging => messaging.Service("payments")
     .Consume<AccountOpened, AccountOpenedHandler>()
+    .Consume<CallBank, CallBankHandler>()
     .Consume<LedgerOperationSucceeded, LedgerOperationSucceededHandler>()
     .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>());
 

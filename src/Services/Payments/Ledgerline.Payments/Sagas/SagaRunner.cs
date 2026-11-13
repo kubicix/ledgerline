@@ -3,13 +3,15 @@ using Ledgerline.BuildingBlocks;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
+using Ledgerline.Contracts.Risk;
 using Ledgerline.Payments.Infrastructure;
 using Ledgerline.Payments.Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.Payments.Sagas;
 
-public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock clock, ICrashPoint crashPoint, TimeoutOptions timeoutOptions) : IPostCommitHook
+public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock clock, ICrashPoint crashPoint,
+    TimeoutOptions timeoutOptions, PaymentSagaOptions sagaOptions) : IPostCommitHook
 {
     private static readonly Meter Meter = new("Ledgerline.Payments");
     private static readonly Counter<long> ManualReviews = Meter.CreateCounter<long>("ledgerline.saga.manual_review");
@@ -20,7 +22,7 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
     {
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         db.Payments.Add(payment);
-        var decision = PaymentSaga.Start(payment.Snapshot(), clock.UtcNow);
+        var decision = PaymentSaga.Start(payment.Snapshot(), clock.UtcNow, sagaOptions);
         await ApplyDecisionAsync(payment, decision, "Started", null, null, ct);
         if (transaction is not null)
         {
@@ -34,14 +36,15 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var payment = await db.Payments.SingleOrDefaultAsync(x => x.Id == paymentId, ct)
             ?? throw new InvalidOperationException("The ledger reply references an unknown payment.");
-        var decision = PaymentSaga.Decide(payment.Snapshot(), input, clock.UtcNow);
+        var decision = PaymentSaga.Decide(payment.Snapshot(), input, clock.UtcNow, sagaOptions);
         if (decision.Ignored) return;
         var oldStep = payment.SagaStep;
+        if (decision.Step != oldStep && decision.Step != SagaStep.None) payment.StepAttempt = 1;
         var outcome = input switch { SagaInput.LedgerSucceeded => "Succeeded", SagaInput.LedgerRejected => "Rejected", _ => "Retried" };
         if (input is SagaInput.StepTimedOut)
         {
-            outcome = decision.Status == PaymentStatus.ManualReview ? "TimedOut" : "Retried";
-            if (decision.Status != PaymentStatus.ManualReview) payment.StepAttempt++;
+            outcome = decision.Step == oldStep ? "Retried" : "TimedOut";
+            if (decision.Step == oldStep) payment.StepAttempt++;
         }
         await ApplyDecisionAsync(payment, decision, outcome, oldStep, context, ct);
         if (transaction is not null)
@@ -70,6 +73,15 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
     {
         switch (effect)
         {
+            case SagaEffect.SetBankAuthorizationId authorization:
+                payment.BankAuthorizationId = authorization.Id;
+                break;
+            case SagaEffect.SetBankCaptureId capture:
+                payment.BankCaptureId = capture.Id;
+                break;
+            case SagaEffect.ClearCardToken:
+                payment.CardToken = null;
+                break;
             case SagaEffect.CancelTimeouts:
                 db.SagaTimeouts.RemoveRange(await db.SagaTimeouts.Where(x => x.PaymentId == payment.Id).ToListAsync(ct));
                 break;
@@ -78,17 +90,33 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
                     ? TimeSpan.FromMilliseconds(timeoutOptions.StepTimeoutMs) : timeout.After;
                 db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step, DueAt = clock.UtcNow + after });
                 break;
+            default:
+                PublishEffect(payment.Id, effect, context?.MessageId);
+                break;
+        }
+    }
+
+    private void PublishEffect(Guid paymentId, SagaEffect effect, Guid? causationId)
+    {
+        switch (effect)
+        {
             case SagaEffect.SendCommand { Message: CreditTopUp command }:
-                outbox.Enqueue(command, payment.Id, context?.MessageId);
+                outbox.Enqueue(command, paymentId, causationId);
                 break;
             case SagaEffect.SendCommand { Message: TransferFunds command }:
-                outbox.Enqueue(command, payment.Id, context?.MessageId);
+                outbox.Enqueue(command, paymentId, causationId);
+                break;
+            case SagaEffect.SendCommand { Message: CallBank command }:
+                outbox.Enqueue(command, paymentId, causationId);
+                break;
+            case SagaEffect.SendCommand { Message: EvaluateRisk command }:
+                outbox.Enqueue(command, paymentId, causationId);
                 break;
             case SagaEffect.PublishEvent { Message: PaymentCompleted message }:
-                outbox.Enqueue(message, payment.Id, context?.MessageId);
+                outbox.Enqueue(message, paymentId, causationId);
                 break;
             case SagaEffect.PublishEvent { Message: PaymentFailed message }:
-                outbox.Enqueue(message, payment.Id, context?.MessageId);
+                outbox.Enqueue(message, paymentId, causationId);
                 break;
             default: throw new NotSupportedException("The saga emitted an unsupported effect.");
         }
