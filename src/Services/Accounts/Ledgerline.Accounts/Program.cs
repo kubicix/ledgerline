@@ -1,5 +1,9 @@
 using Ledgerline.Accounts.Infrastructure;
+using Ledgerline.Accounts.Features.LedgerCommands;
+using Ledgerline.Accounts.Ledger;
+using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.Contracts.Accounts;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +18,12 @@ if (args.FirstOrDefault() == "migrate")
 builder.AddLedgerlineWebDefaults("accounts");
 builder.Services.AddDbContext<AccountsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
+builder.Services.AddScoped<EventStore>();
+builder.Services.AddScoped<ILedger, Ledgerline.Accounts.Ledger.Ledger>();
+builder.Services.AddScoped<LedgerOperationRunner>();
+builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<LedgerOperationRunner>());
+builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging => messaging.Service("accounts")
+    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>());
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();

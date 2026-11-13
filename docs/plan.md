@@ -269,7 +269,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T16: Accounts contracts and command handlers (top-up, transfer)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` sections 4, 6 step 1, 8. **Depends:** M1-T10, M1-T15.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Accounts/{CreditTopUp.cs,TransferFunds.cs,LedgerOperationSucceeded.cs,LedgerOperationRejected.cs,JournalEntryPosted.cs,LedgerOperationKind.cs,LedgerRejectionReasons.cs}`; make Contracts reference `Ledgerline.BuildingBlocks.Messaging` (only for `MessageTypeAttribute`, as the spec allows). Create in Accounts: `Features/LedgerCommands/{CreditTopUpHandler.cs,TransferFundsHandler.cs,LedgerOperationRunner.cs}`; modify `Program.cs` (`AddLedgerlineMessaging<AccountsDbContext>`, service name `accounts`). Tests: `tests/Ledgerline.BuildingBlocks.Tests/Contracts/ContractSampleTests.cs` with JSON samples in `Contracts/Samples/*.json`; `tests/Ledgerline.Accounts.IntegrationTests/LedgerCommandTests.cs`.

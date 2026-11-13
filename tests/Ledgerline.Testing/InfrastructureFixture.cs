@@ -1,4 +1,5 @@
 using DotNet.Testcontainers.Builders;
+using System.Collections.Concurrent;
 using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Containers;
 using RabbitMQ.Client;
@@ -14,6 +15,7 @@ namespace Ledgerline.Testing;
 
 public sealed class InfrastructureFixture : IAsyncLifetime
 {
+    private readonly ConcurrentDictionary<string, Lazy<Task<string>>> rabbitVirtualHosts = new(StringComparer.Ordinal);
     private readonly PostgreSqlContainer postgres = new PostgreSqlBuilder("postgres:18.7-alpine").Build();
     private readonly RabbitMqContainer rabbit = new RabbitMqBuilder("rabbitmq:4.4-management")
         .WithPortBinding(FreePort(), 5672)
@@ -35,6 +37,25 @@ public sealed class InfrastructureFixture : IAsyncLifetime
 
     public Task StopRabbitMqAsync() => rabbit.StopAsync();
     public Task StartRabbitMqAsync() => rabbit.StartAsync();
+
+    public Task<string> CreateRabbitMqUriAsync(string databaseName)
+    {
+        if (string.IsNullOrEmpty(databaseName) || databaseName.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_'))
+            throw new ArgumentException("Database name must contain ASCII letters, digits or underscores.", nameof(databaseName));
+        return rabbitVirtualHosts.GetOrAdd(databaseName,
+            name => new Lazy<Task<string>>(() => CreateVirtualHostAsync(name))).Value;
+    }
+
+    private async Task<string> CreateVirtualHostAsync(string databaseName)
+    {
+        var vhost = "ledgerline_" + databaseName;
+        var created = await rabbit.ExecAsync(["rabbitmqctl", "add_vhost", vhost]);
+        if (created.ExitCode != 0) throw new InvalidOperationException("Could not create the isolated RabbitMQ test virtual host.");
+        var username = new ConnectionFactory { Uri = new Uri(RabbitMqUri) }.UserName;
+        var permissions = await rabbit.ExecAsync(["rabbitmqctl", "set_permissions", "-p", vhost, username, ".*", ".*", ".*"]);
+        if (permissions.ExitCode != 0) throw new InvalidOperationException("Could not configure the isolated RabbitMQ test virtual host.");
+        return new UriBuilder(RabbitMqUri) { Path = vhost }.Uri.AbsoluteUri;
+    }
 
     public async Task<string> CreateDatabaseAsync(string prefix)
     {

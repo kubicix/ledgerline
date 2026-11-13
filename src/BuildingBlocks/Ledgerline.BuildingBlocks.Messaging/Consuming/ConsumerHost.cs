@@ -152,6 +152,7 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
         await handlers.InvokeAsync(envelope, scope.ServiceProvider, context, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        foreach (var hook in scope.ServiceProvider.GetServices<IPostCommitHook>()) hook.OnCommitted();
     }
 
     [LoggerMessage(1, LogLevel.Warning, "Message handling failed; delivery remains available for redelivery.")]

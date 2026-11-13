@@ -49,23 +49,23 @@ public static class MessagingServiceCollectionExtensions
 
     private static void RegisterOptions(IServiceCollection services, IConfiguration configuration, string service)
     {
-        services.AddSingleton(new RabbitMqOptions
+        services.AddSingleton(_ => new RabbitMqOptions
         {
             Uri = configuration["Messaging:RabbitMq:Uri"] ?? throw new InvalidOperationException("Messaging:RabbitMq:Uri is required.")
         });
-        services.AddSingleton(new RelayOptions
+        services.AddSingleton(_ => new RelayOptions
         {
             PollIntervalMs = ReadInt(configuration, "Relay:PollIntervalMs", 250),
             BatchSize = ReadInt(configuration, "Relay:BatchSize", 100)
         });
-        services.AddSingleton(new ConsumerOptions
+        services.AddSingleton(_ => new ConsumerOptions
         {
             Service = service,
             Prefetch = checked((ushort)ReadInt(configuration, "Consumer:Prefetch", 16)),
             MaxAttempts = ReadInt(configuration, "Consumer:MaxAttempts", 5),
             RetryTtlMs = ReadInt(configuration, "Consumer:RetryTtlMs", 5000)
         });
-        services.AddSingleton(new RetentionOptions { Days = ReadInt(configuration, "Retention:Days", 7) });
+        services.AddSingleton(_ => new RetentionOptions { Days = ReadInt(configuration, "Retention:Days", 7) });
     }
 
     private static int ReadInt(IConfiguration configuration, string key, int defaultValue) =>

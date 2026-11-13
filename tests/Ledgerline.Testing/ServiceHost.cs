@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Ledgerline.Testing;
 
@@ -30,7 +31,8 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             ?? throw new InvalidOperationException("The service migration entry point is missing.");
         var cs = await DatabaseFactory.CreateMigratedAsync(infrastructure, databasePrefix, contextType,
             connection => (Task)migrate.Invoke(null, [connection, CancellationToken.None])!);
-        var factory = new ConfiguredFactory(infrastructure, cs, overrides);
+        var rabbitMqUri = await infrastructure.CreateRabbitMqUriAsync(new NpgsqlConnectionStringBuilder(cs).Database!);
+        var factory = new ConfiguredFactory(rabbitMqUri, cs, overrides);
         try
         {
             _ = factory.Services;
@@ -57,7 +59,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
 
     public ValueTask DisposeAsync() => factory.DisposeAsync();
 
-    private sealed class ConfiguredFactory(InfrastructureFixture infrastructure, string cs,
+    private sealed class ConfiguredFactory(string rabbitMqUri, string cs,
         Action<IServiceCollection>? overrides) : WebApplicationFactory<TProgram>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -67,7 +69,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Database"] = cs,
-                ["Messaging:RabbitMq:Uri"] = infrastructure.RabbitMqUri,
+                ["Messaging:RabbitMq:Uri"] = rabbitMqUri,
                 ["Auth:Mode"] = "DevHeaders"
             }));
             builder.ConfigureTestServices(services => overrides?.Invoke(services));
