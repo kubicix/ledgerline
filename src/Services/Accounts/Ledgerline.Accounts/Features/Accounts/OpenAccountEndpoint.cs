@@ -34,11 +34,16 @@ internal static class OpenAccountEndpoint
     {
         var key = (string)http.Items[IdempotencyEndpointFilter.KeyItem]!;
         var hash = (string)http.Items[IdempotencyEndpointFilter.HashItem]!;
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AccountRequestKey.LockAsync(db, user.Id, key, ct);
+        if (await db.StatusRequests.AnyAsync(x => x.CallerId == user.Id && x.Key == key, ct)) return ProblemResults.IdempotencyKeyReused();
         try
         {
-            return await IdempotentCreate.ExecuteAsync(hash,
+            var result = await IdempotentCreate.ExecuteAsync(hash,
                 () => CreateAsync(request, db, user, clock, outbox, configuration, key, hash, ct),
                 () => FindExistingAsync(db, user.Id, key, ct), IsUniqueViolation);
+            if (result is IStatusCodeHttpResult { StatusCode: >= 200 and < 300 }) await transaction.CommitAsync(ct);
+            return result;
         }
         catch (DbUpdateException error) when (IsUniqueViolation(error))
         {

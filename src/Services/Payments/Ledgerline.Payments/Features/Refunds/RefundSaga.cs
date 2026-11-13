@@ -56,6 +56,7 @@ public sealed class RefundRunner(PaymentsDbContext db, IOutbox outbox, IClock cl
         if (decision.Ignored) return true;
         refund.Status = decision.Status;
         refund.FailureReason = decision.FailureReason;
+        await db.SagaTimeouts.Where(x => x.RefundId == refund.Id).ExecuteDeleteAsync(ct);
         payment.RefundedMinor = checked(payment.RefundedMinor + decision.RefundedDelta);
         payment.UpdatedAt = now;
         RefundAudit.Append(db, refund, decision.Status == RefundStatus.Completed ? "RefundCompleted" : "RefundFailed", now);

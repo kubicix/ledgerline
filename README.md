@@ -47,6 +47,14 @@ wallets, top up 10,000 minor units, transfer 2,500, authorize a merchant payment
 capture 2,000 and refund 500. They verify balances, zero trial balance and Mailpit
 delivery. Local data survives
 `down`. To run infrastructure alone, use `docker compose up -d`.
+Mailpit uses a persistent local database volume so a restart preserves the email
+evidence used by repeated smoke runs.
+
+For a complete first M2 verification, stop an earlier demo stack and use a fresh
+project, for example `docker compose -p ledgerline-m2-demo --profile app up --build -d --wait`.
+This preserves the earlier project's volumes and exercises new flows rather than
+replaying earlier milestone resources. Use the same `-p ledgerline-m2-demo` on
+subsequent Compose commands for that demo.
 
 Compose runs migration jobs before starting each application. Applications run as
 non-root users and expose anonymous `/health/live` and `/health/ready` endpoints;

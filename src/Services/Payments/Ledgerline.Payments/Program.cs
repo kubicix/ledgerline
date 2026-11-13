@@ -34,6 +34,7 @@ builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
 builder.Services.AddScoped<RefundRunner>();
+builder.Services.AddScoped<RefundRecovery>();
 builder.Services.AddSingleton(provider =>
 {
     var configuration = provider.GetRequiredService<IConfiguration>();

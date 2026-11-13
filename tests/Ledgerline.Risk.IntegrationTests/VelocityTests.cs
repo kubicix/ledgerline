@@ -17,6 +17,72 @@ public sealed class RedisLifecycle;
 public sealed class VelocityTests(InfrastructureFixture infrastructure)
 {
     [Fact]
+    public async Task Redis_recovery_cannot_forget_evaluations_recorded_during_outage()
+    {
+        await using var host = await ServiceHost<Program>.StartAsync(infrastructure, "risk_recovery");
+        await using var probe = await BrokerProbe.CreateAsync(host.Services.GetRequiredService<RabbitMqOptions>().Uri, "risk.event.#");
+        var redis = host.Services.GetRequiredService<IConnectionMultiplexer>();
+        var customer = Guid.NewGuid();
+        await infrastructure.StopRedisAsync();
+        try
+        {
+            await Eventually.ShouldAsync(() => Task.FromResult(!redis.IsConnected));
+            for (var i = 0; i < 9; i++)
+            {
+                var request = Request(customer);
+                await probe.PublishAsync(request, request.PaymentId);
+                await probe.WaitForAsync<RiskApproved>(x => x.PaymentId == request.PaymentId);
+            }
+        }
+        finally { await infrastructure.StartRedisAsync(); }
+        await host.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<Ledgerline.BuildingBlocks.Messaging.Consuming.ConsumerHost<RiskDbContext>>().Single()
+            .StopAsync(TestContext.Current.CancellationToken);
+        await using var recovered = await ServiceHost<Program>.StartOnDatabaseAsync(infrastructure, host.ConnectionString);
+        recovered.Services.GetRequiredService<IConnectionMultiplexer>().IsConnected.ShouldBeTrue();
+        var tenth = Request(customer);
+        await probe.PublishAsync(tenth, tenth.PaymentId);
+        await probe.WaitForAsync<RiskApproved>(x => x.PaymentId == tenth.PaymentId);
+        var excess = Request(customer);
+        await probe.PublishAsync(excess, excess.PaymentId);
+        await probe.WaitForAsync<RiskRejected>(x => x.PaymentId == excess.PaymentId);
+    }
+
+    [Fact]
+    public async Task Delayed_requests_use_request_time_for_velocity_and_daily_totals()
+    {
+        await using var host = await ServiceHost<Program>.StartAsync(infrastructure, "risk_delayed");
+        await using var probe = await BrokerProbe.CreateAsync(host.Services.GetRequiredService<RabbitMqOptions>().Uri, "risk.event.#");
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RiskDbContext>();
+            await db.Rules.Where(x => x.Code == Ledgerline.Risk.Domain.RuleCode.VelocityLimit)
+                .ExecuteUpdateAsync(set => set.SetProperty(x => x.MaxCount, 1), TestContext.Current.CancellationToken);
+        }
+        _ = host.Services.GetRequiredService<IConnectionMultiplexer>();
+        await infrastructure.StopRedisAsync();
+        try
+        {
+            var customer = Guid.NewGuid();
+            var yesterday = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-1).AddHours(23).AddMinutes(59), TimeSpan.Zero);
+            var first = Request(customer) with { RequestedAt = yesterday };
+            var second = Request(customer) with { RequestedAt = yesterday.AddMinutes(2) };
+            await probe.PublishAsync(first, first.PaymentId);
+            await probe.WaitForAsync<RiskApproved>(x => x.PaymentId == first.PaymentId);
+            await probe.PublishAsync(second, second.PaymentId);
+            await probe.WaitForAsync<RiskApproved>(x => x.PaymentId == second.PaymentId);
+            await using var scope = host.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<RiskDbContext>();
+            var totals = await db.DailyTotals.ToArrayAsync(TestContext.Current.CancellationToken);
+            totals.Length.ShouldBe(2);
+            totals.ShouldAllBe(x => x.TotalMinor == 100);
+            var requests = await db.Decisions.Select(x => EF.Property<DateTimeOffset>(x, "RequestedAt")).ToArrayAsync(TestContext.Current.CancellationToken);
+            requests.Select(x => DateOnly.FromDateTime(x.UtcDateTime)).Distinct().Count().ShouldBe(2);
+        }
+        finally { await infrastructure.StartRedisAsync(); }
+    }
+
+    [Fact]
     public async Task Database_fallback_serializes_customer_velocity_across_currencies_and_replicas()
     {
         var gate = new CounterGate();
@@ -30,7 +96,7 @@ public sealed class VelocityTests(InfrastructureFixture infrastructure)
         {
             var db = scope.ServiceProvider.GetRequiredService<RiskDbContext>();
             db.Decisions.AddRange(Enumerable.Range(0, 9).Select(_ => new RiskDecision { PaymentId = Guid.NewGuid(),
-                CustomerId = customer, Kind = "TopUp", AmountMinor = 1, Currency = "TRY", Outcome = "Approved", EvaluatedAt = DateTimeOffset.UtcNow }));
+                CustomerId = customer, Kind = "TopUp", AmountMinor = 1, Currency = "TRY", Outcome = "Approved", EvaluatedAt = DateTimeOffset.UtcNow, RequestedAt = DateTimeOffset.UtcNow }));
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
         var firstRedis = first.Services.GetRequiredService<IConnectionMultiplexer>();

@@ -13,7 +13,12 @@ public sealed partial class FallbackVelocityCounter(RedisVelocityCounter redis, 
     {
         if (redis.IsConnected)
         {
-            try { return await redis.CountAsync(customerId, paymentId, at, windowSeconds, ct); }
+            try
+            {
+                var cached = await redis.CountAsync(customerId, paymentId, at, windowSeconds, ct);
+                // A recovered cache must not forget evaluations committed while it was unavailable.
+                return Math.Max(cached, await database.CountAsync(customerId, paymentId, at, windowSeconds, ct));
+            }
             catch (RedisException error) { RedisFailed(logger, error); }
         }
         else RedisFailed(logger, null);

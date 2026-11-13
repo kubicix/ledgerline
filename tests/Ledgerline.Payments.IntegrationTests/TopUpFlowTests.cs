@@ -94,7 +94,7 @@ public sealed class TopUpFlowTests(InfrastructureFixture infrastructure)
     public async Task Frozen_account_is_rejected_synchronously_when_replica_knows()
     {
         await using var scenario = await SetupAsync();
-        await scenario.Probe.PublishAsync(new AccountStatusChanged(scenario.Wallet, "Frozen", DateTimeOffset.UtcNow), scenario.Wallet);
+        await scenario.Probe.PublishAsync(new AccountStatusChanged(scenario.Wallet, "Frozen", DateTimeOffset.UtcNow, 2), scenario.Wallet);
         await WaitForFrozenAsync(scenario.Host, scenario.Wallet);
         using var customer = scenario.Host.CreateClient(scenario.Owner);
         using var request = Request(scenario.Wallet, "tok_ok");
@@ -108,7 +108,7 @@ public sealed class TopUpFlowTests(InfrastructureFixture infrastructure)
     {
         await using var scenario = await SetupAsync();
         var wallet = Guid.NewGuid();
-        await scenario.Probe.PublishAsync(new AccountStatusChanged(wallet, "Frozen", DateTimeOffset.UtcNow), wallet);
+        await scenario.Probe.PublishAsync(new AccountStatusChanged(wallet, "Frozen", DateTimeOffset.UtcNow, 2), wallet);
         await scenario.Probe.PublishAsync(new AccountOpened(wallet, scenario.Owner, "CustomerWallet", "TRY", null, DateTimeOffset.UtcNow), wallet);
         await WaitForFrozenAsync(scenario.Host, wallet);
     }

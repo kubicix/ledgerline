@@ -54,6 +54,7 @@ public sealed class RiskDbContext(DbContextOptions<RiskDbContext> options) : DbC
         decision.Property(x => x.Outcome).HasColumnName("outcome");
         decision.Property(x => x.RuleCodes).HasColumnName("rule_codes").HasColumnType("text[]");
         decision.Property(x => x.EvaluatedAt).HasColumnName("evaluated_at");
+        decision.Property(x => x.RequestedAt).HasColumnName("requested_at");
         decision.HasIndex(x => new { x.CustomerId, x.EvaluatedAt }).IsDescending(false, true).HasDatabaseName("ix_decisions_customer_time");
     }
 }

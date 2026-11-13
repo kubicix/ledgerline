@@ -18,6 +18,47 @@ namespace Ledgerline.Payments.IntegrationTests;
 public sealed class RefundFlowTests(InfrastructureFixture infrastructure)
 {
     [Fact]
+    public async Task Refund_recovers_after_five_consumer_failures_without_freeing_pending_capacity()
+    {
+        var failure = new RefundFailure();
+        await using var scenario = await MerchantScenario.StartAsync(infrastructure, accountOverrides: services =>
+        {
+            services.AddSingleton(new Ledgerline.BuildingBlocks.Messaging.Consuming.ConsumerOptions { Service = "accounts", MaxAttempts = 5, RetryTtlMs = 20 });
+            services.AddScoped<Ledgerline.Accounts.Ledger.ILedger>(provider => new FailingLedger(
+                ActivatorUtilities.CreateInstance<Ledgerline.Accounts.Ledger.Ledger>(provider), failure));
+        }, paymentOverrides: services => services.AddSingleton(new TimeoutOptions { StepTimeoutMs = 500, PollIntervalMs = 20 }));
+        var payment = await CaptureAsync(scenario);
+        failure.Broken = true;
+        using var response = await RefundAsync(scenario, payment, 1500);
+        var id = (await PaymentTestSetup.BodyAsync(response)).GetProperty("id").GetGuid();
+        await Eventually.ShouldAsync(() => Task.FromResult(Volatile.Read(ref failure.Attempts) >= 5));
+        using var exceeds = await RefundAsync(scenario, payment, 1500);
+        exceeds.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        failure.Broken = false;
+        await scenario.Probe.WaitForAsync<PaymentRefunded>(x => x.RefundId == id);
+        (await scenario.PaymentAsync(payment)).RefundedMinor.ShouldBe(1500);
+        await LedgerAssert.InvariantsHoldAsync(scenario.Accounts.ConnectionString);
+    }
+
+    private sealed class RefundFailure
+    {
+        internal volatile bool Broken;
+        internal int Attempts;
+    }
+    private sealed class FailingLedger(Ledgerline.Accounts.Ledger.ILedger inner, RefundFailure failure) : Ledgerline.Accounts.Ledger.ILedger
+    {
+        public Task<Ledgerline.Accounts.Ledger.PostingResult> PostAsync(Ledgerline.Accounts.Ledger.PostingRequest request, CancellationToken ct)
+        {
+            if (failure.Broken && request.EntryType == Ledgerline.Accounts.Ledger.EntryType.Refund)
+            {
+                Interlocked.Increment(ref failure.Attempts);
+                throw new InvalidOperationException("Simulated temporary ledger persistence failure.");
+            }
+            return inner.PostAsync(request, ct);
+        }
+    }
+
+    [Fact]
     public async Task Partial_refund_completes_and_updates_refunded_minor()
     {
         await using var scenario = await MerchantScenario.StartAsync(infrastructure);

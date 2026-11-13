@@ -1,9 +1,7 @@
 using Ledgerline.BuildingBlocks;
-using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web.Auth;
 using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.BuildingBlocks.Web.Problems;
-using Ledgerline.Contracts.Accounts;
 using Ledgerline.Payments.Infrastructure;
 using Ledgerline.Payments.Infrastructure.Entities;
 using Ledgerline.Payments.Sagas;
@@ -16,7 +14,7 @@ public sealed record CreateRefundRequest(long AmountMinor);
 internal static class CreateRefundEndpoint
 {
     internal static async Task<IResult> HandleAsync(Guid id, CreateRefundRequest request, HttpContext http,
-        PaymentsDbContext db, ICurrentUser user, IClock clock, IOutbox outbox, CancellationToken ct)
+        PaymentsDbContext db, ICurrentUser user, IClock clock, RefundRecovery recovery, CancellationToken ct)
     {
         var key = (string)http.Items[IdempotencyEndpointFilter.KeyItem]!;
         var hash = (string)http.Items[IdempotencyEndpointFilter.HashItem]!;
@@ -37,9 +35,7 @@ internal static class CreateRefundEndpoint
             RequestedBy = user.Id, IdempotencyKey = key, RequestHash = hash, CreatedAt = clock.UtcNow };
         db.Refunds.Add(refund);
         RefundAudit.Append(db, refund, "RefundStarted", refund.CreatedAt);
-        var decision = RefundSaga.Start(new(refund.Id, id, refund.AmountMinor, refund.Status), payment.Snapshot());
-        var command = (RefundFunds)((SagaEffect.SendCommand)decision.Effects.Single()).Message;
-        outbox.Enqueue(command, id);
+        recovery.Start(refund, payment);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return Accepted(refund);

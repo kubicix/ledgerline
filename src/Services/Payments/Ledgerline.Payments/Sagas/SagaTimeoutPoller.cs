@@ -1,6 +1,7 @@
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Messaging.Outbox;
 using Ledgerline.Payments.Infrastructure;
+using Ledgerline.Payments.Features.Refunds;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.Payments.Sagas;
@@ -49,7 +50,9 @@ public sealed partial class SagaTimeoutPoller(IServiceScopeFactory scopes, Timeo
         }
         crashPoint.Hit("saga.timeout-locked");
         var runner = scope.ServiceProvider.GetRequiredService<SagaRunner>();
-        await runner.ApplyAsync(timeout.PaymentId, new SagaInput.StepTimedOut(timeout.Step), null, ct);
+        if (timeout.RefundId is { } refund)
+            await scope.ServiceProvider.GetRequiredService<RefundRecovery>().RetryAsync(refund, payment, timeout.DurationMs, ct);
+        else await runner.ApplyAsync(timeout.PaymentId, new SagaInput.StepTimedOut(timeout.Step), null, ct);
         if (db.Entry(timeout).State != EntityState.Detached)
         {
             db.SagaTimeouts.Remove(timeout);

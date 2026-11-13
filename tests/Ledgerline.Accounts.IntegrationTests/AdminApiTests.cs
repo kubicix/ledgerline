@@ -14,8 +14,74 @@ using StatusMessage = Ledgerline.Contracts.Accounts.AccountStatusChanged;
 
 namespace Ledgerline.Accounts.IntegrationTests;
 
+[Collection("Dependency lifecycle")]
 public sealed class AdminApiTests(InfrastructureFixture infrastructure)
 {
+    [Fact]
+    public async Task Freeze_replay_does_not_undo_newer_unfreeze_even_without_redis_metadata()
+    {
+        await using var host = await StartAsync();
+        var wallet = await WalletAsync(host);
+        var owner = Guid.NewGuid();
+        using var admin = host.CreateClient(owner, "admin");
+        using var first = await PostAsync(admin, wallet, "freeze", "original");
+        using var noop = await PostAsync(admin, wallet, "freeze", "noop");
+        using var newer = await PostAsync(admin, wallet, "unfreeze", "newer");
+        using var redis = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+        await redis.GetDatabase().KeyDeleteAsync($"idem:accounts:{owner}:original");
+        await redis.GetDatabase().KeyDeleteAsync($"idem:accounts:{owner}:noop");
+        using var replay = await PostAsync(admin, wallet, "freeze", "original");
+        using var noopReplay = await PostAsync(admin, wallet, "freeze", "noop");
+        replay.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        noopReplay.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        await using var scope = host.Services.CreateAsyncScope();
+        (await scope.ServiceProvider.GetRequiredService<AccountsDbContext>().Accounts.SingleAsync(x => x.Id == wallet, TestContext.Current.CancellationToken)).Status.ShouldBe("Active");
+        await LedgerAssert.InvariantsHoldAsync(host.ConnectionString);
+    }
+
+    [Fact]
+    public async Task Status_key_cannot_be_reused_for_another_account_without_redis_metadata()
+    {
+        await using var host = await StartAsync();
+        var first = await WalletAsync(host);
+        var second = await WalletAsync(host);
+        var owner = Guid.NewGuid();
+        using var admin = host.CreateClient(owner, "admin");
+        using var changed = await PostAsync(admin, first, "freeze", "cross");
+        await infrastructure.StopRedisAsync();
+        try
+        {
+            using var reused = await PostAsync(admin, second, "freeze", "cross");
+            reused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        }
+        finally { await infrastructure.StartRedisAsync(); }
+        await LedgerAssert.InvariantsHoldAsync(host.ConnectionString);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Creation_and_status_commands_share_durable_key_scope(bool statusFirst)
+    {
+        await using var host = await StartAsync();
+        var target = await WalletAsync(host);
+        var owner = Guid.NewGuid();
+        using var client = host.CreateClient(owner, "admin,customer");
+        async Task<HttpResponseMessage> CreateAsync()
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/accounts") { Content = JsonContent.Create(new { type = "CustomerWallet", currency = "EUR" }) };
+            request.Headers.Add("Idempotency-Key", "scope");
+            return await client.SendAsync(request, TestContext.Current.CancellationToken);
+        }
+        using var first = statusFirst ? await PostAsync(client, target, "freeze", "scope") : await CreateAsync();
+        first.IsSuccessStatusCode.ShouldBeTrue();
+        using var redis = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+        await redis.GetDatabase().KeyDeleteAsync($"idem:accounts:{owner}:scope");
+        using var second = statusFirst ? await CreateAsync() : await PostAsync(client, target, "freeze", "scope");
+        second.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        await LedgerAssert.InvariantsHoldAsync(host.ConnectionString);
+    }
+
     [Fact]
     public async Task Freeze_requires_admin()
     {
@@ -35,7 +101,9 @@ public sealed class AdminApiTests(InfrastructureFixture infrastructure)
         using var admin = host.CreateClient(Guid.NewGuid(), "admin");
         using var response = await PostAsync(admin, wallet, "freeze");
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-        (await probe.WaitForAsync<StatusMessage>(x => x.AccountId == wallet)).Status.ShouldBe("Frozen");
+        var message = await probe.WaitForAsync<StatusMessage>(x => x.AccountId == wallet);
+        message.Status.ShouldBe("Frozen");
+        message.Version.ShouldBe(2);
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AccountsDbContext>();
         var stored = await db.Events.SingleAsync(x => x.StreamId == wallet && x.Type == "account-status-changed.v1", TestContext.Current.CancellationToken);
@@ -124,10 +192,10 @@ public sealed class AdminApiTests(InfrastructureFixture infrastructure)
         await using var scope = host.Services.CreateAsyncScope();
         return await TestAccounts.OpenWalletAsync(scope.ServiceProvider.GetRequiredService<AccountsDbContext>(), Guid.NewGuid(), "TRY");
     }
-    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, Guid id, string action)
+    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, Guid id, string action, string? key = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/accounts/{id}/{action}");
-        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("Idempotency-Key", key ?? Guid.NewGuid().ToString("N"));
         return await client.SendAsync(request, TestContext.Current.CancellationToken);
     }
     private static async Task PostEntryAsync(ServiceHost<Program> host, PostingRequest request)

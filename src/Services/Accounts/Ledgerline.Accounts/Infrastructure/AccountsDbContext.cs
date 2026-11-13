@@ -13,6 +13,7 @@ public sealed class AccountsDbContext(DbContextOptions<AccountsDbContext> option
     public DbSet<JournalLine> JournalLines => Set<JournalLine>();
     public DbSet<Hold> Holds => Set<Hold>();
     public DbSet<LedgerOperation> LedgerOperations => Set<LedgerOperation>();
+    public DbSet<AccountStatusRequest> StatusRequests => Set<AccountStatusRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -21,6 +22,14 @@ public sealed class AccountsDbContext(DbContextOptions<AccountsDbContext> option
         MapEvents(modelBuilder);
         MapJournal(modelBuilder);
         MapHoldsAndOperations(modelBuilder);
+        var request = modelBuilder.Entity<AccountStatusRequest>();
+        request.ToTable("account_status_requests");
+        request.HasKey(x => new { x.CallerId, x.Key });
+        request.Property(x => x.CallerId).HasColumnName("caller_id");
+        request.Property(x => x.Key).HasColumnName("idempotency_key");
+        request.Property(x => x.RequestHash).HasColumnName("request_hash");
+        request.Property(x => x.AccountId).HasColumnName("account_id");
+        request.Property(x => x.CreatedAt).HasColumnName("created_at");
     }
 
     private static void MapAccounts(ModelBuilder modelBuilder)

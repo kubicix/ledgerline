@@ -10,4 +10,5 @@ public sealed class RiskDecision
     public string Outcome { get; set; } = "";
     public string[] RuleCodes { get; set; } = [];
     public DateTimeOffset EvaluatedAt { get; set; }
+    public DateTimeOffset RequestedAt { get; set; }
 }

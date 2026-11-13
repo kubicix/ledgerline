@@ -32,7 +32,8 @@ public sealed class EvaluateRiskHandler(RiskDbContext db, RuleCache cache, IVelo
         {
             PaymentId = message.PaymentId, CustomerId = message.CustomerId, Kind = message.Kind,
             AmountMinor = message.AmountMinor, Currency = message.Currency, Outcome = result.Approved ? "Approved" : "Rejected",
-            RuleCodes = result.RuleCodes.ToArray(), EvaluatedAt = new DateTimeOffset(clock.UtcNow.UtcTicks / 10 * 10, TimeSpan.Zero)
+            RuleCodes = result.RuleCodes.ToArray(), EvaluatedAt = new DateTimeOffset(clock.UtcNow.UtcTicks / 10 * 10, TimeSpan.Zero),
+            RequestedAt = DateTimeOffset.FromUnixTimeMilliseconds(message.RequestedAt.ToUnixTimeMilliseconds())
         };
         db.Decisions.Add(decision);
         Reply(decision, context);

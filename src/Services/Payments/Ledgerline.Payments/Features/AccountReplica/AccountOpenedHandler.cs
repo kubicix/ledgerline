@@ -11,8 +11,8 @@ public sealed class AccountOpenedHandler(PaymentsDbContext db) : IMessageHandler
     {
         if (message.OwnerId is null) return;
         await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO account_refs (account_id, owner_id, type, currency, status)
-            VALUES ({message.AccountId}, {message.OwnerId.Value}, {message.Type}, {message.Currency}, 'Active')
+            INSERT INTO account_refs (account_id, owner_id, type, currency, status, status_version)
+            VALUES ({message.AccountId}, {message.OwnerId.Value}, {message.Type}, {message.Currency}, 'Active', 1)
             ON CONFLICT (account_id) DO NOTHING
             """, ct);
     }

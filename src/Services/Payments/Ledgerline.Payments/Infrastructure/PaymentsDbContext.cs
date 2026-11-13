@@ -102,6 +102,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
         timeout.Property(x => x.DueAt).HasColumnName("due_at");
         timeout.Property(x => x.CommandMessageId).HasColumnName("command_message_id");
         timeout.Property(x => x.DurationMs).HasColumnName("duration_ms");
+        timeout.Property(x => x.RefundId).HasColumnName("refund_id");
         timeout.HasOne<Payment>().WithMany().HasForeignKey(x => x.PaymentId).OnDelete(DeleteBehavior.Restrict);
         timeout.HasIndex(x => x.DueAt).HasDatabaseName("ix_saga_timeouts_due");
     }
@@ -116,6 +117,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
         account.Property(x => x.Type).HasColumnName("type").IsRequired();
         account.Property(x => x.Currency).HasColumnName("currency").HasColumnType("character(3)").IsRequired();
         account.Property(x => x.Status).HasColumnName("status").IsRequired();
+        account.Property(x => x.StatusVersion).HasColumnName("status_version");
     }
 }
 

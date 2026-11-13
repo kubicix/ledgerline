@@ -182,6 +182,10 @@ namespace Ledgerline.Risk.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("outcome");
 
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
                     b.PrimitiveCollection<string[]>("RuleCodes")
                         .IsRequired()
                         .HasColumnType("text[]")
