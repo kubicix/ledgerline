@@ -62,7 +62,9 @@ public sealed partial class SagaTimeoutPoller(IServiceScopeFactory scopes, Timeo
     private static async Task<bool> WaitForPublicationAsync(PaymentsDbContext db, Infrastructure.Entities.SagaTimeout timeout, CancellationToken ct)
     {
         if (timeout.CommandMessageId is not { } id) return false;
-        var command = await db.Set<OutboxMessage>().AsNoTracking().SingleAsync(x => x.MessageId == id, ct);
+        var command = await db.Set<OutboxMessage>().AsNoTracking().SingleOrDefaultAsync(x => x.MessageId == id, ct);
+        // Retention removes only confirmed commands, after every command timeout has elapsed.
+        if (command is null) { timeout.CommandMessageId = null; return false; }
         var duration = TimeSpan.FromMilliseconds(timeout.DurationMs);
         if (command.ProcessedAt is not { } published)
         {

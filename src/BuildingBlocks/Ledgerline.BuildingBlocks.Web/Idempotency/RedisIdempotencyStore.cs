@@ -16,19 +16,22 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer connection, str
     private const string BeginScript = """
         local value = redis.call('GET', KEYS[1])
         if not value then
-            redis.call('SET', KEYS[1], 'in-progress:' .. ARGV[1], 'EX', 86400)
+            redis.call('SET', KEYS[1], ARGV[2], 'EX', 30)
             return 'started'
+        end
+        if value == 'in-progress:' .. ARGV[1] and redis.call('TTL', KEYS[1]) > 30 then
+            redis.call('EXPIRE', KEYS[1], 30)
         end
         return value
         """;
     private const string CompleteScript = """
-        if redis.call('GET', KEYS[1]) == 'in-progress:' .. ARGV[1] then
-            redis.call('SET', KEYS[1], 'done:' .. ARGV[1] .. ':' .. ARGV[2], 'EX', 86400)
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            redis.call('SET', KEYS[1], 'done:' .. ARGV[2] .. ':' .. ARGV[3], 'EX', 86400)
         end
         return 0
         """;
     private const string ReleaseScript = """
-        if redis.call('GET', KEYS[1]) == 'in-progress:' .. ARGV[1] then
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
             redis.call('DEL', KEYS[1])
         end
         return 0
@@ -39,13 +42,15 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer connection, str
         var redisKey = Key(scope, key);
         try
         {
-            var value = (string?)await connection.GetDatabase().ScriptEvaluateAsync(BeginScript, [redisKey], [hash]);
+            var lease = $"in-progress:{hash}:{Guid.NewGuid():N}";
+            var value = (string?)await connection.GetDatabase().ScriptEvaluateAsync(BeginScript, [redisKey], [hash, lease]);
             if (value == "started")
             {
-                leases[redisKey] = hash;
+                leases[redisKey] = lease;
                 return new IdempotencyBegin.Started();
             }
-            if (value == "in-progress:" + hash) return new IdempotencyBegin.InProgress();
+            if (value == "in-progress:" + hash || value?.StartsWith("in-progress:" + hash + ":", StringComparison.Ordinal) == true)
+                return new IdempotencyBegin.InProgress();
             var prefix = "done:" + hash + ":";
             if (value?.StartsWith(prefix, StringComparison.Ordinal) == true &&
                 Guid.TryParse(value.AsSpan(prefix.Length), out var id)) return new IdempotencyBegin.Done(id);
@@ -60,9 +65,11 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer connection, str
 
     public async Task CompleteAsync(string scope, string key, string hash, Guid resourceId)
     {
+        var redisKey = Key(scope, key);
+        if (!leases.TryGetValue(redisKey, out var lease)) return;
         try
         {
-            await connection.GetDatabase().ScriptEvaluateAsync(CompleteScript, [Key(scope, key)], [hash, resourceId.ToString()]);
+            await connection.GetDatabase().ScriptEvaluateAsync(CompleteScript, [redisKey], [lease, hash, resourceId.ToString()]);
         }
         catch (RedisException error) { RecordFailure(error); }
     }
@@ -70,10 +77,10 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer connection, str
     public async Task ReleaseAsync(string scope, string key)
     {
         var redisKey = Key(scope, key);
-        if (!leases.Remove(redisKey, out var hash)) return;
+        if (!leases.Remove(redisKey, out var lease)) return;
         try
         {
-            await connection.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [redisKey], [hash]);
+            await connection.GetDatabase().ScriptEvaluateAsync(ReleaseScript, [redisKey], [lease]);
         }
         catch (RedisException error) { RecordFailure(error); }
     }

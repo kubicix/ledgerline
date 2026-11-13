@@ -17,6 +17,20 @@ namespace Ledgerline.Gateway.Tests;
 
 public sealed class GatewayTests
 {
+    [Fact]
+    public async Task Stalled_upstream_returns_complete_504_problem()
+    {
+        await using var scenario = await Scenario.StartAsync(new() { ["ReverseProxy:Routes:accounts:Timeout"] = "00:00:00.050" });
+        using var response = await scenario.Client.GetAsync("/api/accounts/slow", TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.GatewayTimeout);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        problem.GetProperty("status").GetInt32().ShouldBe(504);
+        problem.GetProperty("type").GetString()!.ShouldStartWith("urn:ledgerline:problem:");
+        problem.GetProperty("detail").GetString().ShouldNotBeNullOrWhiteSpace();
+        problem.GetProperty("traceId").GetString().ShouldNotBeNullOrWhiteSpace();
+    }
+
     [Theory]
     [InlineData("accounts/123", "accounts/123")]
     [InlineData("ledger/trial-balance", "ledger/trial-balance")]
@@ -166,10 +180,12 @@ public sealed class GatewayTests
             var upstream = builder.Build();
             Scenario? scenario = null;
             upstream.MapGet("/health/ready", () => Results.Ok());
-            upstream.Map("/{**path}", (HttpContext context) =>
+            upstream.Map("/{**path}", async (HttpContext context) =>
             {
                 Interlocked.Increment(ref scenario!.calls);
-                if (context.Request.Path.Value!.EndsWith("/fail", StringComparison.Ordinal)) return Results.StatusCode(500);
+                if (context.Request.Path.Value!.EndsWith("/fail", StringComparison.Ordinal)) return (IResult)Results.StatusCode(500);
+                if (context.Request.Path.Value.EndsWith("/slow", StringComparison.Ordinal))
+                    await Task.Delay(TimeSpan.FromSeconds(2), context.RequestAborted);
                 return Results.Json(new { method = context.Request.Method, path = context.Request.Path.Value,
                     correlation = context.Request.Headers["X-Correlation-Id"].ToString(), authorization = context.Request.Headers.Authorization.ToString(),
                     idempotency = context.Request.Headers["Idempotency-Key"].ToString() });

@@ -1,5 +1,8 @@
 using System.Net;
 using Ledgerline.BuildingBlocks.Messaging;
+using Ledgerline.BuildingBlocks.Web.Idempotency;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 using Ledgerline.Payments.Infrastructure;
 using Ledgerline.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +17,57 @@ public sealed class RedisLifecycle;
 [Collection("Redis lifecycle")]
 public sealed class IdempotencyTests(InfrastructureFixture infrastructure)
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Abandoned_lease_recovers_before_or_after_database_commit(bool committed)
+    {
+        await using var host = await PaymentTestSetup.StartAsync(infrastructure);
+        await using var probe = await PaymentTestSetup.ProbeAsync(host);
+        var owner = Guid.NewGuid();
+        var from = await PaymentTestSetup.AddAccountAsync(host, probe, owner);
+        var to = await PaymentTestSetup.AddAccountAsync(host, probe, Guid.NewGuid());
+        using var client = host.CreateClient(owner);
+        Guid? original = null;
+        if (committed)
+        {
+            using var first = await PaymentTestSetup.TransferAsync(client, from, to, key: "abandoned");
+            original = (await PaymentTestSetup.BodyAsync(first)).GetProperty("id").GetGuid();
+        }
+        using var redis = await ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+        var key = $"idem:payments:{owner}:abandoned";
+        await redis.GetDatabase().KeyDeleteAsync(key);
+        var abandoned = new RedisIdempotencyStore(redis, "payments", NullLogger<RedisIdempotencyStore>.Instance);
+        var hash = RequestHash.Compute("POST", "/transfers", JsonSerializer.SerializeToUtf8Bytes(new { fromAccountId = from, toAccountId = to, amountMinor = 2500, currency = "TRY" }));
+        (await abandoned.TryBeginAsync(owner.ToString(), "abandoned", hash)).ShouldBeOfType<IdempotencyBegin.Started>();
+        (await redis.GetDatabase().KeyTimeToLiveAsync(key))!.Value.ShouldBeLessThanOrEqualTo(TimeSpan.FromSeconds(30));
+        await Eventually.ShouldAsync(async () => !await redis.GetDatabase().KeyExistsAsync(key), TimeSpan.FromSeconds(35));
+        using var recovered = await PaymentTestSetup.TransferAsync(client, from, to, key: "abandoned");
+        recovered.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        if (original is { } id) (await PaymentTestSetup.BodyAsync(recovered)).GetProperty("id").GetGuid().ShouldBe(id);
+        await AssertSinglePaymentAsync(host);
+    }
+
+    [Fact]
+    public async Task Expired_owner_cannot_complete_or_release_a_successor_lease()
+    {
+        using var redis = await ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+        var old = new RedisIdempotencyStore(redis, "ownership", NullLogger<RedisIdempotencyStore>.Instance);
+        var next = new RedisIdempotencyStore(redis, "ownership", NullLogger<RedisIdempotencyStore>.Instance);
+        var observer = new RedisIdempotencyStore(redis, "ownership", NullLogger<RedisIdempotencyStore>.Instance);
+        var scope = Guid.NewGuid().ToString();
+        (await old.TryBeginAsync(scope, "key", "hash")).ShouldBeOfType<IdempotencyBegin.Started>();
+        await redis.GetDatabase().KeyDeleteAsync($"idem:ownership:{scope}:key");
+        (await next.TryBeginAsync(scope, "key", "hash")).ShouldBeOfType<IdempotencyBegin.Started>();
+        await old.CompleteAsync(scope, "key", "hash", Guid.NewGuid());
+        await old.ReleaseAsync(scope, "key");
+        (await observer.TryBeginAsync(scope, "key", "hash")).ShouldBeOfType<IdempotencyBegin.InProgress>();
+        var id = Guid.NewGuid();
+        await next.CompleteAsync(scope, "key", "hash", id);
+        (await observer.TryBeginAsync(scope, "key", "hash")).ShouldBe(new IdempotencyBegin.Done(id));
+        (await redis.GetDatabase().KeyTimeToLiveAsync($"idem:ownership:{scope}:key"))!.Value.ShouldBeGreaterThan(TimeSpan.FromHours(23));
+    }
+
     [Fact]
     public async Task Second_request_while_first_in_progress_returns_409_with_retry_after()
     {

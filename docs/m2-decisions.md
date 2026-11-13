@@ -1,7 +1,8 @@
 # M2 implementation decisions
 
-These decisions were recorded during inline execution. Each preserves its rationale
-and the cost if it is wrong. Final review findings are added at the merge checkpoint.
+These historical decisions preserve their rationale and the cost if wrong.
+Read [the final review checkpoint](m2-review.md) for findings that supersede an
+earlier decision, especially 204 admin idempotency and Risk timestamp semantics.
 
 ## Rulings
 
@@ -74,3 +75,11 @@ and the cost if it is wrong. Final review findings are added at the merge checkp
 - Task 18: Ruling: Enforce the 64-KiB limit for Content-Length and unknown-length bodies, buffering at most the bounded content before forwarding. Gateway readiness fetches signing keys and stays healthy after a successful fetch independently of downstream health. Cost if wrong: allowed unknown-length requests are buffered before proxying.
 - Task 19: Ruling: Move channel readiness probing into the messaging assembly, retain service health behavior, and enforce private account balance mutation through ApplyPosting for both live posting and rebuild. Reflection guards were watched RED before these changes. Cost if wrong: Account exposes the single explicit posting method required by the plan.
 - Task 19: Ruling: Prove the whole system on a fresh named Compose project so stable smoke keys cannot replay M1 money instead of executing the M2 bank/Risk path. Preserve repeatable keys for users with retained local data; an already captured merchant payment satisfies the prior authorization wait on replay. Stop only this project afterward without deleting volumes. Cost if wrong: the isolated proof retains its local volumes until explicitly removed.
+- Final: Ruling: M3 telemetry/load/security expansion and failure suites remain scheduled after M2. Cost if wrong: users must not infer production telemetry/load certification from M2 completion.
+- Final: Ruling: Phase 2 reporting/reconciliation and Kubernetes remain outside this milestone. Cost if wrong: those deployment and reporting capabilities are absent at this checkpoint.
+- Final: Ruling: Production Keycloak hardening and real-acquirer compatibility remain repository non-goals. Cost if wrong: this local fake-bank portfolio system cannot be used as a production payment deployment.
+- Final: Ruling: SMTP remains at-least-once and Gateway rate limits remain per instance, as explicitly accepted limitations. Cost if wrong: an email may duplicate after a crash, and aggregate rate limits scale with replicas.
+- Final: Ruling: Keep in-flight Redis leases bounded at 30 seconds and completed metadata at 24 hours, with unique lease ownership for CAS completion/release. Legacy in-progress values have their excessive TTL reduced without extending an existing short TTL. Cost if wrong: a request still running after 30 seconds may overlap a retry; durable database keys and locks remain the safety guarantee.
+- Final: Ruling: A missing command outbox row means its already confirmed, expired publication evidence was removed by processed-only retention; clear the marker and retry the due step normally. Cost if wrong: manual deletion of an unpublished row could consume an attempt, an administrative corruption outside normal retention.
+- Final: Ruling: Serialize Risk evaluations by customer using a transaction advisory lock across currencies/days. The first test accidentally serialized while new Redis clients connected; warming both clients and awaiting disconnection produced the real RED with 11 approvals instead of 10 before the lock. Cost if wrong: one customer has serialized evaluation throughput; unrelated advisory hash collisions also serialize harmlessly.
+- Final: Ruling: The reviewer left Gateway cancellation classification unproven. A new stalled-upstream regression observed 503 instead of 504, so promote it to an Important protocol finding. Inspect IHttpRequestTimeoutFeature.RequestTimeoutToken as well as the YARP error enum. Regression RED -> GREEN with full 504 RFC problem fields. Cost if wrong: genuine client disconnects remain transport failures, distinct from the gateway deadline.

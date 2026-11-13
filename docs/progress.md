@@ -5,7 +5,8 @@ Updated: 2026-11-13. Repository: https://github.com/kubicix/ledgerline.
 ## Current checkpoint
 
 - M1: complete, reviewed and merged through PR #1.
-- M2: all 19 implementation tasks verified. Final independent review and PR integration are pending.
+- M2: all 19 implementation tasks verified. Final review completed; four schema-dependent
+  corrections await approval before the fix pass and PR integration can finish.
 - M3 and subsequent milestones: not started.
 - Overall completed tasks: 44 of 82, approximately 54%. These percentages count tasks equally;
   they do not estimate effort or production readiness.
@@ -25,7 +26,8 @@ pausing. Do not start M3 without a new instruction.
   - [x] T17: publication-aware saga timeouts.
   - [x] T18: Gateway.
   - [x] T19: Compose, architecture and end-to-end verification.
-  - [ ] Final fresh review, required fixes, PR checks and merge.
+  - [x] Final fresh review.
+  - [ ] Remaining review fixes, PR checks and merge.
 - [ ] M3 and remaining plan tasks: see [the implementation plan](plan.md).
 
 ## Technology
@@ -47,6 +49,9 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
 4. During active execution, `.superpowers/sdd/plan/progress.md` contains task
    evidence and rulings. Trust committed completion records over remembered
    context. Do not redo completed tasks.
+   Read [the final review checkpoint](m2-review.md) before continuing. A bundled
+   migration/API approval is pending; do not treat the completed task checkboxes
+   as permission to merge with these open findings.
 5. Run tests before claiming success. Avoid building projects while another test
    process is using their output DLLs on Windows. Run full-solution integration
    modules serially to avoid overloading RabbitMQ during vhost startup.
@@ -58,6 +63,12 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
 Final implementation gate: all 491 solution tests passed, with zero failures or
 skips. The solution build passed with zero warnings and errors. Tests ran serially
 by module with the command below. Final review fixes, if required, need a new suite gate.
+
+Independent review-fix checkpoint: 497/497 solution tests passed, zero failures or
+skips, in 8m12s. Customer-wide Risk serialization, retained-command timeout
+recovery, bounded/owned Redis leases and Gateway 504 classification have verified
+regressions. Four schema/API-dependent findings still await approval. M2 has not
+been pushed, and its PR/merge have not been performed. See [review details](m2-review.md).
 
 After T15-T16: Payments integration 60/60, Payments pure tests 159/159, contract
 samples 22/22, Notifications integration 10/10, Notifications templates 9/9,
@@ -82,6 +93,6 @@ The final M2 checkpoint will update this document with the reviewed commit,
 PR/merge links, final evidence, accepted decisions and deferred findings.
 Execution decisions and their tradeoffs are preserved in [M2 decisions](m2-decisions.md).
 
-After a new user instruction to start M3, the next task is M3-T01, distributed
+After M2 integration and a new user instruction to start M3, the next task is M3-T01, distributed
 tracing across HTTP, the outbox and RabbitMQ. Read ADR 0009 and the task brief
 before adding packages; instrumentation versions must be verified individually.

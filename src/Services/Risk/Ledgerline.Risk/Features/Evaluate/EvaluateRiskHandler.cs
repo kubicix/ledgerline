@@ -15,6 +15,8 @@ public sealed class EvaluateRiskHandler(RiskDbContext db, RuleCache cache, IVelo
     {
         var existing = await db.Decisions.FindAsync([message.PaymentId], ct);
         if (existing is not null) { Reply(existing, context); return; }
+        // Velocity is customer-wide, including different currencies and requested days.
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({"risk:" + message.CustomerId}, 0))", ct);
         var day = DateOnly.FromDateTime(message.RequestedAt.UtcDateTime);
         var total = await LockTotalAsync(message.CustomerId, day, message.Currency, ct);
         existing = await db.Decisions.SingleOrDefaultAsync(x => x.PaymentId == message.PaymentId, ct);

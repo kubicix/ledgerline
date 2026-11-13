@@ -1,6 +1,7 @@
 using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.Gateway;
 using Yarp.ReverseProxy.Forwarder;
+using Microsoft.AspNetCore.Http.Timeouts;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddLedgerlineWebDefaults("gateway");
@@ -24,7 +25,9 @@ app.MapReverseProxy(proxy =>
     {
         await next(context);
         if (context.Response.HasStarted || context.GetForwarderErrorFeature() is not { } error) return;
-        var status = error.Error == ForwarderError.RequestTimedOut ? 504 : 503;
+        var timedOut = error.Error == ForwarderError.RequestTimedOut ||
+            context.Features.Get<IHttpRequestTimeoutFeature>()?.RequestTimeoutToken.IsCancellationRequested == true;
+        var status = timedOut ? 504 : 503;
         context.Response.Clear();
         await Results.Problem(statusCode: status, title: status == 504 ? "Upstream timed out" : "Upstream unavailable").ExecuteAsync(context);
     });

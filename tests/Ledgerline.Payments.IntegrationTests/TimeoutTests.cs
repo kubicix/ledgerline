@@ -14,6 +14,34 @@ namespace Ledgerline.Payments.IntegrationTests;
 public sealed class TimeoutTests(InfrastructureFixture infrastructure)
 {
     [Fact]
+    public async Task Retained_command_cleanup_does_not_stall_this_or_other_due_payments()
+    {
+        await using var host = await ServiceHost<Program>.StartAsync(infrastructure, "retained_timeout",
+            services => services.AddSingleton(new TimeoutOptions { StepTimeoutMs = 60000, PollIntervalMs = 20 }));
+        await using var probe = await PaymentTestSetup.ProbeAsync(host);
+        var first = await StartTransferAsync(host, probe);
+        var second = await StartTransferAsync(host, probe);
+        await probe.WaitForAsync<TransferFunds>(x => x.PaymentId == first);
+        await probe.WaitForAsync<TransferFunds>(x => x.PaymentId == second);
+        await Eventually.ShouldAsync(async () =>
+        {
+            await using var scope = host.Services.CreateAsyncScope();
+            return !await scope.ServiceProvider.GetRequiredService<PaymentsDbContext>().Set<OutboxMessage>().AnyAsync(x => x.ProcessedAt == null);
+        });
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentsDbContext>();
+            await db.Set<OutboxMessage>().Where(x => x.CorrelationId == first && x.Type == "accounts.command.transfer-funds.v1" && x.ProcessedAt != null)
+                .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+            await db.SagaTimeouts.Where(x => x.PaymentId == first).ExecuteUpdateAsync(set =>
+                set.SetProperty(x => x.DueAt, DateTimeOffset.UtcNow.AddSeconds(-2)).SetProperty(x => x.DurationMs, 0), TestContext.Current.CancellationToken);
+            await db.SagaTimeouts.Where(x => x.PaymentId == second).ExecuteUpdateAsync(set =>
+                set.SetProperty(x => x.DueAt, DateTimeOffset.UtcNow.AddSeconds(-1)).SetProperty(x => x.DurationMs, 0), TestContext.Current.CancellationToken);
+        }
+        await Eventually.ShouldAsync(() => Task.FromResult(Commands(probe, first).Length >= 2 && Commands(probe, second).Length >= 2));
+    }
+
+    [Fact]
     public Task Step_attempts_are_not_consumed_while_broker_is_down() => BrokerOutageAsync(1);
 
     [Fact]
