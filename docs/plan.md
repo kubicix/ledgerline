@@ -401,7 +401,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T02: Redis fast path for idempotency
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9 steps 2 and 4. **Depends:** M2-T01.
 **Files:** Create in Web `Idempotency/RedisIdempotencyStore.cs`, `Idempotency/IIdempotencyStore.cs`; modify `IdempotencyEndpointFilter.cs`, `WebDefaults.cs` (register `IConnectionMultiplexer` with `AbortOnConnectFail = false`). Test `tests/Ledgerline.Payments.IntegrationTests/IdempotencyTests.cs`.

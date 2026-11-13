@@ -1,4 +1,5 @@
 using Ledgerline.Payments.Infrastructure;
+using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.Payments.Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,7 +10,7 @@ public sealed record TimelineResponse(string Step, string Outcome, DateTimeOffse
 public sealed record PaymentResponse(Guid Id, string Kind, string Status, long AmountMinor, string Currency,
     Guid? SourceAccountId, Guid DestinationAccountId, string? CaptureMode, long CapturedMinor, long RefundedMinor,
     string? FailureReason, DateTimeOffset? AuthorizationExpiresAt, DateTimeOffset? ReconciledAt,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<TimelineResponse> Timeline)
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, IReadOnlyList<TimelineResponse> Timeline) : IIdempotentResource
 {
     internal static async Task<PaymentResponse> FromAsync(Payment payment, PaymentsDbContext db, CancellationToken ct)
     {

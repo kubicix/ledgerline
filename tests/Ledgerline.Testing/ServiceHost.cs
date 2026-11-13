@@ -41,7 +41,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         string cs, Action<IServiceCollection>? overrides = null)
     {
         var rabbitMqUri = await infrastructure.CreateRabbitMqUriAsync(new NpgsqlConnectionStringBuilder(cs).Database!);
-        var factory = new ConfiguredFactory(rabbitMqUri, cs, overrides);
+        var factory = new ConfiguredFactory(rabbitMqUri, cs, infrastructure.RedisConnectionString, overrides);
         try
         {
             _ = factory.Services;
@@ -72,7 +72,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         services.AddDbContext<TDbContext>((provider, options) => options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()));
     }
 
-    private sealed class ConfiguredFactory(string rabbitMqUri, string cs,
+    private sealed class ConfiguredFactory(string rabbitMqUri, string cs, string redisConnectionString,
         Action<IServiceCollection>? overrides) : WebApplicationFactory<TProgram>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -82,6 +82,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Database"] = cs,
+                ["ConnectionStrings:Redis"] = redisConnectionString,
                 ["Messaging:RabbitMq:Uri"] = rabbitMqUri,
                 ["Auth:Mode"] = "TestKey",
                 ["Auth:Authority"] = TestTokens.Issuer,

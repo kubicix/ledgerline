@@ -161,6 +161,15 @@ public sealed class AccountsApiTests(InfrastructureFixture infrastructure)
         {
             using (response)
             {
+                if (response.StatusCode == HttpStatusCode.Conflict)
+                {
+                    response.Headers.RetryAfter!.Delta.ShouldBe(TimeSpan.FromSeconds(1));
+                    using var replay = await OpenAsync(client, key: "concurrent-key");
+                    replay.StatusCode.ShouldBe(HttpStatusCode.Created);
+                    var replayed = await replay.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+                    ids.Add(replayed.GetProperty("id").GetGuid());
+                    continue;
+                }
                 response.StatusCode.ShouldBe(HttpStatusCode.Created);
                 var account = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
                 ids.Add(account.GetProperty("id").GetGuid());

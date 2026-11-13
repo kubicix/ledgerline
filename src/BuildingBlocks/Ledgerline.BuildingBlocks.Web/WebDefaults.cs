@@ -1,10 +1,14 @@
 using System.Diagnostics;
 using Ledgerline.BuildingBlocks.Web.Auth;
 using Ledgerline.BuildingBlocks.Web.Health;
+using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.BuildingBlocks.Web.Problems;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 
 namespace Ledgerline.BuildingBlocks.Web;
 
@@ -31,6 +35,15 @@ public static class WebDefaults
             .AddPolicy(Policies.Admin, policy => policy.RequireRole("admin"));
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<ICurrentUser, ClaimsCurrentUser>();
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var options = ConfigurationOptions.Parse(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
+            options.AbortOnConnectFail = false;
+            return ConnectionMultiplexer.Connect(options);
+        });
+        builder.Services.AddScoped<IIdempotencyStore>(provider => new RedisIdempotencyStore(
+            provider.GetRequiredService<IConnectionMultiplexer>(), serviceName,
+            provider.GetRequiredService<ILogger<RedisIdempotencyStore>>()));
         builder.Services.AddHealthChecks();
         return builder;
     }

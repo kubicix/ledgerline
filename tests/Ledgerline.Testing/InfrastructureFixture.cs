@@ -37,6 +37,8 @@ public sealed class InfrastructureFixture : IAsyncLifetime
 
     public Task StopRabbitMqAsync() => rabbit.StopAsync();
     public Task StartRabbitMqAsync() => rabbit.StartAsync();
+    public Task StopRedisAsync() => redis.StopAsync();
+    public Task StartRedisAsync() => redis.StartAsync();
 
     public Task<string> CreateRabbitMqUriAsync(string databaseName)
     {

@@ -59,6 +59,7 @@ services:
       ConnectionStrings__Database: Host=postgres;Database=accounts_db;Username=accounts;Password=accounts_dev
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
       Auth__Mode: Oidc
+      ConnectionStrings__Redis: redis:6379
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
       Auth__RequireHttpsMetadata: "false"
@@ -92,6 +93,7 @@ services:
       ConnectionStrings__Database: Host=postgres;Database=payments_db;Username=payments;Password=payments_dev
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
       Auth__Mode: Oidc
+      ConnectionStrings__Redis: redis:6379
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
       Auth__RequireHttpsMetadata: "false"
