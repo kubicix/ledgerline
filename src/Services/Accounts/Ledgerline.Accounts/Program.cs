@@ -29,10 +29,12 @@ builder.Services.AddDbContext<AccountsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<EventStore>();
 builder.Services.AddScoped<ILedger, Ledgerline.Accounts.Ledger.Ledger>();
+builder.Services.AddScoped<Holds>();
 builder.Services.AddScoped<LedgerOperationRunner>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<LedgerOperationRunner>());
 builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging => messaging.Service("accounts")
-    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>());
+    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>()
+    .Consume<ReserveFunds, ReserveFundsHandler>().Consume<CaptureFunds, CaptureFundsHandler>().Consume<ReleaseFunds, ReleaseFundsHandler>());
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();

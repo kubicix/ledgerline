@@ -483,7 +483,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T10: Accounts: holds (reserve, capture, release)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 4 (three commands), section 6 hold rules, invariant A7. **Depends:** M1-T16.
 **Files:** Create contracts `ReserveFunds.cs`, `CaptureFunds.cs`, `ReleaseFunds.cs` plus samples; in Accounts `Features/LedgerCommands/{ReserveFundsHandler.cs,CaptureFundsHandler.cs,ReleaseFundsHandler.cs}`, `Ledger/Holds.cs`; modify `Ledger/Ledger.cs` (hold projection updates inside `PostAsync`), `LedgerAssert.cs` (new check: `PAYMENTS_PENDING` balance equals the sum of `Active` holds per currency), `RebuildProjectionsCommand.cs` (rebuild `holds`), `AccountResponse` (`heldMinor`). Test `tests/Ledgerline.Accounts.IntegrationTests/HoldTests.cs`.

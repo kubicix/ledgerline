@@ -18,11 +18,19 @@ public static class LedgerAssert
             ) bad
             """, "Every entry must have at least two balanced lines.");
         await AssertZeroAsync(connection, "SELECT count(*) FROM accounts WHERE type <> 'System' AND balance_minor < 0", "Wallets cannot be negative.");
+        await AssertZeroAsync(connection, """
+            SELECT count(*) FROM
+                (SELECT currency, balance_minor FROM accounts WHERE system_code='PAYMENTS_PENDING') pending
+                FULL JOIN (SELECT currency, sum(amount_minor) amount FROM holds WHERE status='Active' GROUP BY currency) held USING (currency)
+            WHERE coalesce(pending.balance_minor, 0) <> coalesce(held.amount, 0)
+            """, "PAYMENTS_PENDING must equal active holds per currency.");
         var accounts = new Dictionary<Guid, AccountState>();
         var lines = new List<LineState>();
-        await ReplayAsync(connection, accounts, lines);
+        var holds = new Dictionary<Guid, HoldState>();
+        await ReplayAsync(connection, accounts, lines, holds);
         await AssertAccountsAsync(connection, accounts);
         await AssertLinesAsync(connection, lines);
+        await AssertHoldsAsync(connection, holds);
     }
 
     private static async Task AssertZeroAsync(NpgsqlConnection connection, string sql, string because)
@@ -31,7 +39,7 @@ public static class LedgerAssert
         ((long)(await command.ExecuteScalarAsync())!).ShouldBe(0L, because);
     }
 
-    private static async Task ReplayAsync(NpgsqlConnection connection, Dictionary<Guid, AccountState> accounts, List<LineState> lines)
+    private static async Task ReplayAsync(NpgsqlConnection connection, Dictionary<Guid, AccountState> accounts, List<LineState> lines, Dictionary<Guid, HoldState> holds)
     {
         await using var command = new NpgsqlCommand("SELECT global_seq,stream_id,version,type,data,occurred_at FROM events ORDER BY global_seq", connection);
         await using var reader = await command.ExecuteReaderAsync();
@@ -55,9 +63,37 @@ public static class LedgerAssert
             var previous = accounts[id];
             version.ShouldBe(previous.Version + 1, "Stream versions must be gapless.");
             if (type == "account-status-changed.v1") accounts[id] = previous with { Status = data.GetProperty("status").GetString()!, Version = version };
-            else if (type == "ledger-entry-posted.v1") accounts[id] = ApplyPosting(id, version, sequence, previous, data, lines);
+            else if (type == "ledger-entry-posted.v1")
+            {
+                accounts[id] = ApplyPosting(id, version, sequence, previous, data, lines);
+                ApplyHold(id, data, holds);
+            }
             else throw new ShouldAssertException($"Unknown ledger event type {type}.");
         }
+    }
+
+    private static void ApplyHold(Guid accountId, JsonElement data, Dictionary<Guid, HoldState> holds)
+    {
+        if (data.GetProperty("direction").GetString() != "Debit") return;
+        var type = data.GetProperty("entryType").GetString();
+        var payment = data.GetProperty("paymentId").GetGuid();
+        if (type == "Hold") holds.Add(payment, new(accountId, data.GetProperty("amountMinor").GetInt64(), data.GetProperty("currency").GetString()!, "Active"));
+        else if (type is "Capture" or "Release") holds[payment] = holds[payment] with { Status = type == "Capture" ? "Captured" : "Released" };
+    }
+
+    private static async Task AssertHoldsAsync(NpgsqlConnection connection, Dictionary<Guid, HoldState> expected)
+    {
+        await using var command = new NpgsqlCommand("SELECT payment_id,account_id,amount_minor,currency,status FROM holds", connection);
+        await using var reader = await command.ExecuteReaderAsync();
+        var count = 0;
+        while (await reader.ReadAsync())
+        {
+            var id = reader.GetGuid(0);
+            expected.ContainsKey(id).ShouldBeTrue("Every hold must have a ledger event.");
+            new HoldState(reader.GetGuid(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4)).ShouldBe(expected[id]);
+            count++;
+        }
+        count.ShouldBe(expected.Count);
     }
 
     private static AccountState ApplyPosting(Guid accountId, int version, long sequence, AccountState previous, JsonElement data, List<LineState> lines)
@@ -106,4 +142,5 @@ public static class LedgerAssert
     private static Guid? NullableGuid(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value.GetGuid() : null;
     private sealed record AccountState(Guid? Owner, string Type, string? Code, string Currency, string Status, long Balance, int Version, string? Email, DateTimeOffset OpenedAt);
     private sealed record LineState(Guid Entry, int Number, Guid Account, string Direction, long Amount, long BalanceAfter, long Sequence);
+    private sealed record HoldState(Guid Account, long Amount, string Currency, string Status);
 }

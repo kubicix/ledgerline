@@ -21,6 +21,7 @@ public sealed class Ledger(AccountsDbContext db, EventStore events, IClock clock
             PaymentId = request.PaymentId, Currency = request.Currency, PostedAt = clock.UtcNow
         };
         var appended = AppendEvents(request, accounts.ToDictionary(x => x.Id), entry);
+        await Holds.ApplyProjectionAsync(db, request, ct);
         db.JournalEntries.Add(entry);
         await db.SaveChangesAsync(ct);
         db.JournalLines.AddRange(appended.Select((item, index) => new JournalLine

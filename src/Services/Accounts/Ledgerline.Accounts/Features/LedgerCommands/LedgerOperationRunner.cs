@@ -12,7 +12,11 @@ public sealed class LedgerOperationRunner(AccountsDbContext db, ILedger ledger, 
 {
     private bool handled;
 
-    public async Task RunAsync(Guid operationId, Guid paymentId, LedgerOperationKind kind, Func<PostingRequest> build,
+    public Task RunAsync(Guid operationId, Guid paymentId, LedgerOperationKind kind, Func<PostingRequest> build,
+        MessageContext context, CancellationToken ct) =>
+        RunAsync(operationId, paymentId, kind, () => ledger.PostAsync(build(), ct), context, ct);
+
+    public async Task RunAsync(Guid operationId, Guid paymentId, LedgerOperationKind kind, Func<Task<PostingResult>> execute,
         MessageContext context, CancellationToken ct)
     {
         var existing = await db.LedgerOperations.FindAsync([operationId], ct);
@@ -22,7 +26,7 @@ public sealed class LedgerOperationRunner(AccountsDbContext db, ILedger ledger, 
             handled = true;
             return;
         }
-        var result = await ledger.PostAsync(build(), ct);
+        var result = await execute();
         var operation = new LedgerOperation
         {
             OperationId = operationId, PaymentId = paymentId, Kind = kind.ToString(), CompletedAt = clock.UtcNow,
