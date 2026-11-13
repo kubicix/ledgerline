@@ -120,7 +120,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T03: Shared test infrastructure
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 2. **Depends:** none.
 **Files:** Create `tests/Ledgerline.Testing/Ledgerline.Testing.csproj` (a library: set `IsTestProject=false`, `OutputType=Library` in the csproj), `InfrastructureFixture.cs`, `Eventually.cs`. Add to `Directory.Packages.props`: `Testcontainers.PostgreSql`, `Testcontainers.RabbitMq`, `Testcontainers.Redis` 4.16.0, `Npgsql` (version that `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 depends on), `RabbitMQ.Client` 7.2.2, `StackExchange.Redis` 3.4.35. Add the project to `Ledgerline.slnx`. Reference it from `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/InfrastructureFixtureTests.cs`.

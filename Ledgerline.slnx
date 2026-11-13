@@ -40,5 +40,6 @@
     <Project Path="tests/Ledgerline.Payments.Tests/Ledgerline.Payments.Tests.csproj" />
     <Project Path="tests/Ledgerline.Risk.Tests/Ledgerline.Risk.Tests.csproj" />
     <Project Path="tests/Ledgerline.SystemTests/Ledgerline.SystemTests.csproj" />
+    <Project Path="tests/Ledgerline.Testing/Ledgerline.Testing.csproj" />
   </Folder>
 </Solution>
