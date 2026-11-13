@@ -155,7 +155,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T06: Confirmed publisher and BrokerProbe
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 2, 7. **Depends:** M1-T05.
 **Files:** Create `RabbitMq/IOutboxPublisher.cs`, `RabbitMq/RabbitMqOutboxPublisher.cs` in Messaging; `tests/Ledgerline.Testing/BrokerProbe.cs`. Test `PublisherTests.cs`.

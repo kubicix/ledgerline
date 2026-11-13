@@ -12,6 +12,8 @@
     <PackageReference Include="Npgsql" />
     <PackageReference Include="RabbitMQ.Client" />
     <PackageReference Include="StackExchange.Redis" />
+    <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
   </ItemGroup>
 </Project>
+
 
