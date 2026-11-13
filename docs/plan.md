@@ -565,7 +565,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T18: Gateway
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `gateway.md`. **Depends:** M2-T01.
 **Files:** In Gateway: `Program.cs`, `appsettings.json` (routes and clusters of the spec, Phase 2 routes left out), `CorrelationIdMiddleware.cs`, `RateLimiting.cs`. Add `Yarp.ReverseProxy` 2.3.0. Reference `Ledgerline.Testing` from `Ledgerline.Gateway.Tests`. Test `tests/Ledgerline.Gateway.Tests/GatewayTests.cs` (stub upstreams: in-test Kestrel servers that echo method, path, and headers).

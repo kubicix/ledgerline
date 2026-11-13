@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="MailKit" Version="5.0.0" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <!-- Test stack -->
     <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.3" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
