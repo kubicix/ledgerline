@@ -19,6 +19,8 @@ public static class AccountsEndpoints
         app.MapGet("/accounts", ListAccountsEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}", GetAccountEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}/entries", ListEntriesEndpoint.HandleAsync).RequireAuthorization();
+        app.MapPost("/accounts/{id:guid}/freeze", FreezeEndpoint.HandleAsync).RequireAuthorization(Policies.Admin).RequireIdempotencyKey();
+        app.MapPost("/accounts/{id:guid}/unfreeze", UnfreezeEndpoint.HandleAsync).RequireAuthorization(Policies.Admin).RequireIdempotencyKey();
         return app;
     }
 }
@@ -87,7 +89,7 @@ internal static class OpenAccountEndpoint
         db.Events.Add(new LedgerEvent
         {
             StreamId = account.Id, Version = 1, Type = "account-opened.v1", OccurredAt = account.OpenedAt,
-            Data = EnvelopeSerializer.ToPayload(new Ledger.AccountOpened(account.OwnerId, account.Type, null, account.Currency, account.ContactEmail)),
+            Data = EnvelopeSerializer.ToPayload(new Ledgerline.Accounts.Ledger.AccountOpened(account.OwnerId, account.Type, null, account.Currency, account.ContactEmail)),
             Metadata = EnvelopeSerializer.ToPayload(new { CorrelationId = account.Id, CausationId = (Guid?)null,
                 OperationId = (Guid?)null, account.IdempotencyKey, account.RequestHash })
         });

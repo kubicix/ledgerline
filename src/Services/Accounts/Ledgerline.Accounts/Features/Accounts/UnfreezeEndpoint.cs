@@ -1,0 +1,11 @@
+using Ledgerline.Accounts.Infrastructure;
+using Ledgerline.BuildingBlocks;
+using Ledgerline.BuildingBlocks.Messaging;
+
+namespace Ledgerline.Accounts.Features.Accounts;
+
+internal static class UnfreezeEndpoint
+{
+    internal static Task<IResult> HandleAsync(Guid id, AccountsDbContext db, IOutbox outbox, IClock clock, CancellationToken ct) =>
+        FreezeEndpoint.ChangeAsync(id, "Active", db, outbox, clock, ct);
+}

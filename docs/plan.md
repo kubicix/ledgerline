@@ -493,7 +493,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T11: Accounts: refund command, freeze and unfreeze, trial balance
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 3 (freeze, unfreeze, trial balance), section 4 (`refund-funds`, `account-status-changed`). **Depends:** M2-T10, M2-T01.
 **Files:** Create contracts `RefundFunds.cs`, `AccountStatusChanged.cs` plus samples; in Accounts `Features/LedgerCommands/RefundFundsHandler.cs`, `Features/Accounts/{FreezeEndpoint.cs,UnfreezeEndpoint.cs}`, `Features/Ledger/TrialBalanceEndpoint.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/{RefundTests.cs,AdminApiTests.cs}`.
