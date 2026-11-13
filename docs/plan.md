@@ -201,7 +201,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T10: Registration API and two-host round trip
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 5. **Depends:** M1-T07, M1-T09.
 **Files:** Create `MessagingBuilder.cs`, `MessagingServiceCollectionExtensions.cs`. Test `RoundTripTests.cs` (two generic hosts, "ping" and "pong", each with its own database and `TestDbContext`).
