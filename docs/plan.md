@@ -346,7 +346,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T23: Crash proofs for Accounts and Payments
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F2 rows 1 and 2. **Depends:** M1-T11, M1-T21.
 **Files:** Test `tests/Ledgerline.Accounts.IntegrationTests/CrashTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/CrashTests.cs`.
