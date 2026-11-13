@@ -246,7 +246,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T14: Ledger entry builders and validation (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `design.md` section 8; `accounts.md` section 6 step 2. **Depends:** M1-T01.
 **Files:** Create in Accounts project: `Ledger/Direction.cs`, `Ledger/EntryType.cs`, `Ledger/PostingLine.cs`, `Ledger/PostingRequest.cs`, `Ledger/PostingResult.cs`, `Ledger/PostingValidator.cs`, `Ledger/Entries.cs`. Test `tests/Ledgerline.Accounts.Tests/{PostingValidatorTests.cs,EntriesTests.cs}`.
