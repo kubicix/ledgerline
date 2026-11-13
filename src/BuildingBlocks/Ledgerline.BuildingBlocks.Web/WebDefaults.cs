@@ -44,6 +44,11 @@ public static class WebDefaults
     {
         ArgumentNullException.ThrowIfNull(app);
         app.UseExceptionHandler();
+        app.Use(async (context, next) =>
+        {
+            if (HttpMethods.IsPost(context.Request.Method)) context.Request.EnableBuffering();
+            await next(context);
+        });
         app.UseStatusCodePages(context => Results.Problem(statusCode: context.HttpContext.Response.StatusCode).ExecuteAsync(context.HttpContext));
         app.UseAuthentication();
         app.UseAuthorization();

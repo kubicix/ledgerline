@@ -110,6 +110,67 @@ public sealed class AccountsApiTests(InfrastructureFixture infrastructure)
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task Same_key_same_body_returns_same_account_with_201()
+    {
+        await using var host = await StartAsync();
+        using var client = host.CreateClient(Ids.New());
+        using var first = await OpenAsync(client, key: "same-key");
+        using var second = await OpenAsync(client, key: "same-key");
+        first.StatusCode.ShouldBe(HttpStatusCode.Created);
+        second.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var original = await first.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        var replay = await second.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        replay.GetProperty("id").GetGuid().ShouldBe(original.GetProperty("id").GetGuid());
+    }
+
+    [Fact]
+    public async Task Same_key_different_body_returns_422()
+    {
+        await using var host = await StartAsync();
+        using var client = host.CreateClient(Ids.New());
+        using var first = await OpenAsync(client, key: "reused-key");
+        first.StatusCode.ShouldBe(HttpStatusCode.Created);
+        using var second = await OpenAsync(client, currency: "USD", key: "reused-key");
+        second.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        var error = await second.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        error.GetProperty("type").GetString().ShouldBe("urn:ledgerline:problem:idempotency-key-reused");
+    }
+
+    public static TheoryData<string> MalformedKeys => new() { new string('a', 65), "has space" };
+
+    [Theory]
+    [MemberData(nameof(MalformedKeys))]
+    public async Task Malformed_key_returns_400(string key)
+    {
+        await using var host = await StartAsync();
+        using var client = host.CreateClient(Ids.New());
+        using var response = await OpenAsync(client, key: key);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Ten_concurrent_identical_requests_create_one_account()
+    {
+        await using var host = await StartAsync();
+        var owner = Ids.New();
+        using var client = host.CreateClient(owner);
+        var responses = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => OpenAsync(client, key: "concurrent-key")));
+        var ids = new List<Guid>();
+        foreach (var response in responses)
+        {
+            using (response)
+            {
+                response.StatusCode.ShouldBe(HttpStatusCode.Created);
+                var account = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+                ids.Add(account.GetProperty("id").GetGuid());
+            }
+        }
+        ids.Distinct().Count().ShouldBe(1);
+        await using var scope = host.Services.CreateAsyncScope();
+        (await scope.ServiceProvider.GetRequiredService<AccountsDbContext>().Accounts.CountAsync(a => a.OwnerId == owner, TestContext.Current.CancellationToken)).ShouldBe(1);
+    }
+
     private Task<ServiceHost<Program>> StartAsync() => ServiceHost<Program>.StartAsync(infrastructure, "accounts_api");
 
     private static async Task<HttpResponseMessage> OpenAsync(HttpClient client, string currency = "TRY", string type = "CustomerWallet",

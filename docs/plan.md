@@ -291,7 +291,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T18: HTTP idempotency (database guarantee)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9, steps 1 and 3. **Depends:** M1-T17.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/Idempotency/{IdempotencyKey.cs,RequestHash.cs,IdempotencyEndpointFilter.cs}`; modify `OpenAccountEndpoint.cs` to use them. Test `tests/Ledgerline.BuildingBlocks.Tests/RequestHashTests.cs`, extend `AccountsApiTests.cs`.

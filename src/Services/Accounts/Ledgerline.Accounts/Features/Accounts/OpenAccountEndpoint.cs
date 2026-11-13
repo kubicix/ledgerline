@@ -3,6 +3,7 @@ using Ledgerline.Accounts.Infrastructure.Entities;
 using Ledgerline.BuildingBlocks;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web.Auth;
+using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.BuildingBlocks.Web.Problems;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -14,7 +15,7 @@ public static class AccountsEndpoints
 {
     public static WebApplication MapAccountsEndpoints(this WebApplication app)
     {
-        app.MapPost("/accounts", OpenAccountEndpoint.HandleAsync).RequireAuthorization(policy => policy.RequireRole("customer", "merchant"));
+        app.MapPost("/accounts", OpenAccountEndpoint.HandleAsync).RequireAuthorization(policy => policy.RequireRole("customer", "merchant")).RequireIdempotencyKey();
         app.MapGet("/accounts", ListAccountsEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}", GetAccountEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}/entries", ListEntriesEndpoint.HandleAsync).RequireAuthorization();
@@ -29,24 +30,46 @@ internal static class OpenAccountEndpoint
     internal static async Task<IResult> HandleAsync(OpenAccountRequest request, HttpContext http, AccountsDbContext db,
         ICurrentUser user, IClock clock, IOutbox outbox, IConfiguration configuration, CancellationToken ct)
     {
-        var key = http.Request.Headers["Idempotency-Key"].ToString();
-        if (string.IsNullOrEmpty(key)) return ProblemResults.IdempotencyKeyMissing();
+        var key = (string)http.Items[IdempotencyEndpointFilter.KeyItem]!;
+        var hash = (string)http.Items[IdempotencyEndpointFilter.HashItem]!;
+        try
+        {
+            return await IdempotentCreate.ExecuteAsync(hash,
+                () => CreateAsync(request, db, user, clock, outbox, configuration, key, hash, ct),
+                () => FindExistingAsync(db, user.Id, key, ct), IsUniqueViolation);
+        }
+        catch (DbUpdateException error) when (IsUniqueViolation(error))
+        {
+            return ProblemResults.InvalidState("An account with this type and currency already exists.");
+        }
+    }
+
+    private static async Task<IResult> CreateAsync(OpenAccountRequest request, AccountsDbContext db,
+        ICurrentUser user, IClock clock, IOutbox outbox, IConfiguration configuration, string key, string hash, CancellationToken ct)
+    {
         var errors = Validate(request, user, configuration);
         if (errors.Count != 0) return ProblemResults.Validation(errors);
         var account = new Account
         {
             Id = Ids.New(), OwnerId = user.Id, Type = request.Type, Currency = request.Currency, Status = "Active",
-            Version = 1, ContactEmail = user.Email, IdempotencyKey = key, OpenedAt = clock.UtcNow
+            Version = 1, ContactEmail = user.Email, IdempotencyKey = key, RequestHash = hash, OpenedAt = clock.UtcNow
         };
         db.Accounts.Add(account);
         AppendOpened(db, account);
         outbox.Enqueue(new AccountOpenedMessage(account.Id, account.OwnerId, account.Type, account.Currency, account.ContactEmail, account.OpenedAt), account.Id);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: "23505" })
-        {
-            return ProblemResults.InvalidState("An account with this type and currency already exists.");
-        }
+        await db.SaveChangesAsync(ct);
         return Results.Created("/accounts/" + account.Id, AccountResponse.From(account));
+    }
+
+    private static bool IsUniqueViolation(Exception error) => error is DbUpdateException { InnerException: PostgresException { SqlState: "23505" } };
+
+    private static async Task<IdempotentReplay?> FindExistingAsync(AccountsDbContext db, Guid owner, string key, CancellationToken ct)
+    {
+        db.ChangeTracker.Clear();
+        var account = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(a => a.OwnerId == owner && a.IdempotencyKey == key, ct);
+        if (account is null) return null;
+        var held = await db.Holds.Where(h => h.AccountId == account.Id && h.Status == "Active").SumAsync(h => h.AmountMinor, ct);
+        return new IdempotentReplay(account.RequestHash ?? "", Results.Created("/accounts/" + account.Id, AccountResponse.From(account, held)));
     }
 
     private static Dictionary<string, string[]> Validate(OpenAccountRequest request, ICurrentUser user, IConfiguration configuration)
