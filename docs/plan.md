@@ -324,7 +324,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T21: Payments persistence, account replica, HTTP API, reply handlers
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3 (topups, transfers, GET), 5, 6. **Depends:** M1-T18, M1-T20.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Payments/{PaymentCompleted.cs,PaymentFailed.cs}`; in Payments: `Infrastructure/PaymentsDbContext.cs`, `Infrastructure/Entities/*.cs`, `Infrastructure/Migrations/Initial`, `Infrastructure/MigrateCommand.cs`, `Sagas/SagaRunner.cs`, `Features/AccountReplica/{AccountOpenedHandler.cs}`, `Features/Topups/CreateTopUpEndpoint.cs`, `Features/Transfers/CreateTransferEndpoint.cs`, `Features/Payments/{GetPaymentEndpoint.cs,PaymentResponse.cs}`, `Features/LedgerReplies/{LedgerOperationSucceededHandler.cs,LedgerOperationRejectedHandler.cs}`; modify `Program.cs`. Reference `Ledgerline.Testing` from `Ledgerline.Payments.IntegrationTests`. Test `tests/Ledgerline.Payments.IntegrationTests/{PaymentsApiTests.cs,TransferFlowTests.cs}`. In these tests `BrokerProbe` plays Accounts.
