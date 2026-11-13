@@ -20,6 +20,7 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
             {
                 while (await PublishBatchAsync(stoppingToken)) { }
             }
+            catch (HostAbortedException) { return; }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception error) { LoopFailed(logger, error); }
             await signal.WaitAsync(TimeSpan.FromMilliseconds(options.PollIntervalMs), stoppingToken);
@@ -28,9 +29,13 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
 
     private async Task<bool> PublishBatchAsync(CancellationToken ct)
     {
+        crashPoint.Hit("relay.before-batch");
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var head = await db.Set<OutboxMessage>().Where(x => x.ProcessedAt == null).OrderBy(x => x.Sequence)
+            .Select(x => (DateTimeOffset?)x.NextAttemptAt).FirstOrDefaultAsync(ct);
+        if (head > clock.UtcNow) return false;
         var rows = await db.Set<OutboxMessage>().FromSql($"""
             SELECT * FROM outbox_messages
             WHERE processed_at IS NULL AND next_attempt_at <= now()
@@ -50,6 +55,7 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
 
     private async Task<bool> PublishOneAsync(OutboxMessage row, CancellationToken ct)
     {
+        crashPoint.Hit("relay.before-publish");
         try
         {
             await publisher.PublishAsync(row, ct);

@@ -212,7 +212,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T11: Messaging failure proofs (broker down, crash, duplicate)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F1, F2, F3 (Messaging rows). **Depends:** M1-T10.
 **Files:** Create `tests/Ledgerline.Testing/Faults/{StoppingCrashPoint.cs,DroppingAckStrategy.cs}`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs`.

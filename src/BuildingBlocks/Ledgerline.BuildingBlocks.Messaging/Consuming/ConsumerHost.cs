@@ -12,7 +12,7 @@ using RabbitMQ.Client.Events;
 namespace Ledgerline.BuildingBlocks.Messaging.Consuming;
 
 public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connection, HandlerRegistry handlers,
-    IServiceScopeFactory scopes, IAckStrategy acknowledgments, ConsumerOptions options, IClock clock,
+    IServiceScopeFactory scopes, IAckStrategy acknowledgments, ConsumerOptions options, IClock clock, ICrashPoint crashPoint,
     ILogger<ConsumerHost<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
 {
     private static readonly ActivitySource Activities = new("Ledgerline.Messaging");
@@ -23,16 +23,34 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try { await ConsumeChannelAsync(stoppingToken); }
+            catch (HostAbortedException) { return; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception error)
+            {
+                HandlerFailed(logger, error);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+            }
+        }
+    }
+
+    private async Task ConsumeChannelAsync(CancellationToken stoppingToken)
+    {
+        crashPoint.Hit("consumer.before-channel");
         using var forceStop = new CancellationTokenSource();
         await using var channel = await connection.CreateChannelAsync(false, stoppingToken);
         await Topology.DeclareAsync(channel, options.Service, handlers.TypeNames, options.RetryTtlMs, stoppingToken);
         await channel.BasicQosAsync(0, options.Prefetch, false, stoppingToken);
         var consumer = new AsyncEventingBasicConsumer(channel);
         var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        channel.ChannelShutdownAsync += (_, _) => { closed.TrySetResult(); return Task.CompletedTask; };
         consumer.ReceivedAsync += (_, delivery) => HandleDeliveryAsync(channel, delivery, forceStop.Token);
         consumer.UnregisteredAsync += (_, _) => { drained.TrySetResult(); return Task.CompletedTask; };
         var tag = await channel.BasicConsumeAsync(Topology.InboxQueue(options.Service), false, consumer, stoppingToken);
-        try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
+        try { await closed.Task.WaitAsync(stoppingToken); }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { await DrainAsync(channel, tag, drained.Task, forceStop); }
     }
@@ -48,6 +66,8 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
 
     private async Task HandleDeliveryAsync(IChannel channel, BasicDeliverEventArgs delivery, CancellationToken ct)
     {
+        try { crashPoint.Hit("consumer.before-delivery"); }
+        catch (HostAbortedException) { return; }
         var envelope = ReadEnvelope(delivery.Body);
         if (envelope is null || !handlers.Contains(envelope.Type))
         {
@@ -62,6 +82,7 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
             await ProcessAsync(envelope, attempt, ct);
             await acknowledgments.AckAsync(channel, delivery.DeliveryTag, ct);
         }
+        catch (HostAbortedException) { return; }
         catch (Exception error)
         {
             HandlerFailed(logger, error);

@@ -97,6 +97,7 @@ public sealed class RetryAndDeadLetterTests(InfrastructureFixture infrastructure
         builder.Services.AddSingleton<MessageTypeRegistry>();
         builder.Services.AddSingleton(sp => new HandlerRegistry(sp.GetRequiredService<MessageTypeRegistry>()).Add<RetryMessage, RetryHandler>());
         builder.Services.AddSingleton<IClock, SystemClock>();
+        builder.Services.AddSingleton<ICrashPoint, NoCrashPoint>();
         builder.Services.AddSingleton<IAckStrategy, DefaultAckStrategy>();
         builder.Services.AddSingleton(state);
         builder.Services.AddDbContext<TestDbContext>(options => options.UseNpgsql(cs));

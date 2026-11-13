@@ -99,6 +99,7 @@ public sealed class ConsumerTests(InfrastructureFixture infrastructure)
         builder.Services.AddSingleton<MessageTypeRegistry>();
         builder.Services.AddSingleton(sp => new HandlerRegistry(sp.GetRequiredService<MessageTypeRegistry>()).Add<RenameWidget, RenameWidgetHandler>());
         builder.Services.AddSingleton<IClock, SystemClock>();
+        builder.Services.AddSingleton<ICrashPoint, NoCrashPoint>();
         builder.Services.AddSingleton<IAckStrategy, DefaultAckStrategy>();
         builder.Services.AddSingleton(behavior ?? new HandlerBehavior());
         builder.Services.AddDbContext<TestDbContext>(options => options.UseNpgsql(cs));
