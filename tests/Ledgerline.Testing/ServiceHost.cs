@@ -41,7 +41,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         string cs, Action<IServiceCollection>? overrides = null)
     {
         var rabbitMqUri = await infrastructure.CreateRabbitMqUriAsync(new NpgsqlConnectionStringBuilder(cs).Database!);
-        var factory = new ConfiguredFactory(rabbitMqUri, cs, overrides);
+        var factory = new ConfiguredFactory(rabbitMqUri, cs, infrastructure.RedisConnectionString, overrides);
         try
         {
             _ = factory.Services;
@@ -59,9 +59,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         if (userId is not null)
         {
-            client.DefaultRequestHeaders.Add("X-Dev-User", userId.Value.ToString());
-            client.DefaultRequestHeaders.Add("X-Dev-Roles", roles);
-            if (email is not null) client.DefaultRequestHeaders.Add("X-Dev-Email", email);
+            client.DefaultRequestHeaders.Authorization = new("Bearer", TestTokens.Create(userId.Value, roles, email));
         }
         return client;
     }
@@ -74,7 +72,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
         services.AddDbContext<TDbContext>((provider, options) => options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()));
     }
 
-    private sealed class ConfiguredFactory(string rabbitMqUri, string cs,
+    private sealed class ConfiguredFactory(string rabbitMqUri, string cs, string redisConnectionString,
         Action<IServiceCollection>? overrides) : WebApplicationFactory<TProgram>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -84,8 +82,15 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Database"] = cs,
+                ["ConnectionStrings:Redis"] = redisConnectionString,
+                // M1 fixtures retain their walking-skeleton flow; M2 flow tests explicitly enable the full saga.
+                ["Saga:RiskEnabled"] = "false",
+                ["Saga:BankEnabled"] = "false",
                 ["Messaging:RabbitMq:Uri"] = rabbitMqUri,
-                ["Auth:Mode"] = "DevHeaders"
+                ["Auth:Mode"] = "TestKey",
+                ["Auth:Authority"] = TestTokens.Issuer,
+                ["Auth:Audience"] = "ledgerline-api",
+                ["Auth:TestSigningKey"] = TestTokens.SigningKey
             }));
             builder.ConfigureTestServices(services =>
             {

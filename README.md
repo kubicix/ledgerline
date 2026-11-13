@@ -1,8 +1,8 @@
 # Ledgerline
 
-A payment and wallet backend built as .NET 10 microservices. Milestone 1 implements
-an event-sourced double-entry ledger, transfer and simple top-up sagas, a hand-rolled
-outbox and inbox on RabbitMQ, and integration tests for concurrency and recovery.
+A payment and wallet backend built as .NET 10 microservices. An event-sourced
+double-entry ledger, payment sagas with bank compensation, Risk and email services
+communicate through RabbitMQ with a transactional outbox and inbox.
 
 > **What this is and is not.** A portfolio project that demonstrates concepts:
 > idempotency, double-entry bookkeeping, sagas, reconciliation. It moves no real
@@ -16,16 +16,16 @@ outbox and inbox on RabbitMQ, and integration tests for concurrency and recovery
 |---|---|---|
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
-| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Not started |
+| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
 | M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
 
-Accounts and Payments run together today. The remaining service projects are walking
-skeletons. Bank operations, risk checks, compensation, refunds, the gateway, OIDC,
-application telemetry, Kubernetes and the UI arrive in later milestones. Redis,
-Keycloak and the observability containers are provisioned but not used by M1 logic.
+Accounts, Payments, Risk, Notifications, BankSimulator and Gateway run together.
+Redis supports idempotency and Risk velocity windows; Keycloak issues JWTs.
+Telemetry dashboards, Kubernetes, reporting, reconciliation and the UI belong to
+later milestones. See [progress and agent handoff](docs/progress.md).
 
 ## Quick start
 
@@ -36,29 +36,39 @@ The .NET 10 SDK is needed only to build or test from source.
 ```bash
 docker compose --profile app up --build -d --wait
 ./scripts/smoke.sh
-# SMOKE OK: alice=7500 bob=2500
+# SMOKE OK: alice=6000 bob=2500 shop=1500 trial=0 emails>=4
 
 docker compose --profile app down
 ```
 
 PowerShell: run the same Compose command, then `./scripts/smoke.ps1`, and the same
-shutdown command. Both scripts create fresh synthetic users and wallets, top up
-10,000 minor units, transfer 2,500 and verify the final balances. Local data survives
+shutdown command. Both scripts use seeded synthetic users, open customer and merchant
+wallets, top up 10,000 minor units, transfer 2,500, authorize a merchant payment,
+capture 2,000 and refund 500. They verify balances, zero trial balance and Mailpit
+delivery. Local data survives
 `down`. To run infrastructure alone, use `docker compose up -d`.
+Mailpit uses a persistent local database volume so a restart preserves the email
+evidence used by repeated smoke runs.
+
+For a complete first M2 verification, stop an earlier demo stack and use a fresh
+project, for example `docker compose -p ledgerline-m2-demo --profile app up --build -d --wait`.
+This preserves the earlier project's volumes and exercises new flows rather than
+replaying earlier milestone resources. Use the same `-p ledgerline-m2-demo` on
+subsequent Compose commands for that demo.
 
 Compose runs migration jobs before starting each application. Applications run as
 non-root users and expose anonymous `/health/live` and `/health/ready` endpoints;
 readiness checks their own database and RabbitMQ connection.
 
-M1 uses development headers (`X-Dev-User`, `X-Dev-Roles`, optional `X-Dev-Email`),
-accepted only in Development or Testing. POST requests require `Idempotency-Key`.
-This local authentication mode is replaced by OIDC in M2.
+APIs validate Keycloak JWT bearer tokens with the `ledgerline-api` audience. POST
+requests require `Idempotency-Key`. The local realm seeds `alice` and `bob` as
+customers, `shop` as merchant, and `admin`; development passwords are `<name>_dev`.
+Smoke scripts obtain tokens through the development-only `ledgerline-k6` client and
+reuse stable idempotency keys so retained demo data can be checked repeatedly.
 
 | What | URL | Credentials (local development only) |
 |---|---|---|
-| Accounts API | http://localhost:5101 | Development headers |
-| Payments API | http://localhost:5102 | Development headers |
-| API gateway (from M2) | http://localhost:8080 | Keycloak tokens |
+| API gateway | http://localhost:8080/api | Keycloak tokens; service ports are internal |
 | Keycloak | http://localhost:8081 | `admin` / `ledgerline_dev` |
 | RabbitMQ management | http://localhost:15672 | `ledgerline` / `ledgerline_dev` |
 | Grafana | http://localhost:3000 | anonymous |
@@ -68,21 +78,32 @@ Build and test from source:
 
 ```bash
 dotnet build Ledgerline.slnx
-dotnet test --solution Ledgerline.slnx
+dotnet test --solution Ledgerline.slnx --max-parallel-test-modules 1
 ```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client -->|HTTP: wallets and entries| Accounts
-    Client -->|HTTP: top-ups and transfers| Payments
+    Client -->|JWT| Gateway
+    Keycloak -->|signing keys| Gateway
+    Gateway --> Accounts
+    Gateway --> Payments
+    Gateway --> Risk
+    Gateway --> Notifications
     Accounts -->|events and replies via outbox| RabbitMQ
     RabbitMQ -->|account replica and ledger replies via inbox| Payments
     Payments -->|ledger commands via outbox| RabbitMQ
     RabbitMQ -->|ledger commands via inbox| Accounts
+    RabbitMQ <-->|risk commands and decisions| Risk
+    RabbitMQ -->|account and payment events| Notifications
+    Payments -->|HTTP with stable keys| BankSimulator
+    Notifications -->|SMTP| Mailpit
     Accounts --- AccountsDB[(accounts_db)]
     Payments --- PaymentsDB[(payments_db)]
+    Risk --- RiskDB[(risk_db)]
+    Notifications --- NotificationsDB[(notifications_db)]
+    BankSimulator --- BankDB[(banksim_db)]
     RabbitMQ --> LocalEvents[(local.events)]
 ```
 
@@ -100,15 +121,17 @@ Short version:
 
 - **Accounts and Ledger** is the only writer of money. Append-only event store,
   double-entry journal, balances as projections.
-- **Payments** currently orchestrates ledger credit and transfer steps, including
-  retries and `ManualReview` after five unanswered attempts. Risk, bank steps and
-  compensation are planned for M2.
-- **Risk** and **Notifications** are planned M2 services.
+- **Payments** orchestrates top-up, transfer, merchant authorization/capture/void,
+  refunds and bank compensation. Broker outages do not consume unpublished attempts.
+- **Risk** evaluates limits with database serialization and Redis velocity windows.
+- **Notifications** consumes events independently of SMTP and retries failed delivery.
 - Services own their databases and talk only through RabbitMQ. Every outgoing message
   goes through a transactional outbox; every consumer deduplicates through an inbox.
-- **Gateway** (YARP) and Keycloak authentication are planned for M2.
+- **Gateway** (YARP) validates Keycloak tokens, enforces route policies and rate
+  limits, and forwards correlation and idempotency headers. APIs validate tokens again.
 
 Full design: [docs/design.md](docs/design.md). Per-service specs: [docs/specs](docs/specs).
+Payment flows: [docs/specs/payments.md](docs/specs/payments.md).
 
 ## Decisions
 

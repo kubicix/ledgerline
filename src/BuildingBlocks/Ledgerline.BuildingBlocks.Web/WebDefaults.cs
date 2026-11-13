@@ -1,12 +1,14 @@
 using System.Diagnostics;
 using Ledgerline.BuildingBlocks.Web.Auth;
 using Ledgerline.BuildingBlocks.Web.Health;
+using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.BuildingBlocks.Web.Problems;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 
 namespace Ledgerline.BuildingBlocks.Web;
 
@@ -16,10 +18,6 @@ public static class WebDefaults
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
-        if ((builder.Configuration["Auth:Mode"] ?? "DevHeaders") != "DevHeaders")
-            throw new InvalidOperationException("M1 requires Auth:Mode=DevHeaders.");
-        if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing"))
-            throw new InvalidOperationException("Development header authentication is allowed only in Development or Testing.");
         builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
         {
             var status = context.ProblemDetails.Status ?? 500;
@@ -30,14 +28,22 @@ public static class WebDefaults
         });
         builder.Services.AddExceptionHandler(options => options.StatusCodeSelector = error =>
             error is BadHttpRequestException requestError ? requestError.StatusCode : StatusCodes.Status500InternalServerError);
-        builder.Services.AddAuthentication(DevHeaderAuthenticationHandler.SchemeName)
-            .AddScheme<AuthenticationSchemeOptions, DevHeaderAuthenticationHandler>(DevHeaderAuthenticationHandler.SchemeName, _ => { });
+        builder.AddLedgerlineJwtAuthentication();
         builder.Services.AddAuthorizationBuilder()
             .AddPolicy(Policies.Customer, policy => policy.RequireRole("customer"))
             .AddPolicy(Policies.Merchant, policy => policy.RequireRole("merchant"))
             .AddPolicy(Policies.Admin, policy => policy.RequireRole("admin"));
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+        builder.Services.AddScoped<ICurrentUser, ClaimsCurrentUser>();
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var options = ConfigurationOptions.Parse(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
+            options.AbortOnConnectFail = false;
+            return ConnectionMultiplexer.Connect(options);
+        });
+        builder.Services.AddScoped<IIdempotencyStore>(provider => new RedisIdempotencyStore(
+            provider.GetRequiredService<IConnectionMultiplexer>(), serviceName,
+            provider.GetRequiredService<ILogger<RedisIdempotencyStore>>()));
         builder.Services.AddHealthChecks();
         return builder;
     }

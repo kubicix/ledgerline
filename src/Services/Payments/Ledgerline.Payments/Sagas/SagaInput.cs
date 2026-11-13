@@ -11,7 +11,7 @@ public abstract record SagaInput
     public sealed record BankCaptured(string Id) : SagaInput;
     public sealed record BankCaptureDeclined(string Code) : SagaInput;
     public sealed record BankCompensated : SagaInput;
-    public sealed record CaptureRequested(long AmountMinor) : SagaInput;
+    public sealed record CaptureRequested(long AmountMinor, Guid? OperationId = null) : SagaInput;
     public sealed record VoidRequested : SagaInput;
     public sealed record AuthorizationExpired : SagaInput;
     public sealed record StepTimedOut(SagaStep Step) : SagaInput;

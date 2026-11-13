@@ -111,8 +111,15 @@ public sealed class PaymentsApiTests(InfrastructureFixture infrastructure)
         var responses = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => PaymentTestSetup.TransferAsync(client, from, to, key: "concurrent")));
         try
         {
-            responses.ShouldAllBe(x => x.StatusCode == HttpStatusCode.Accepted);
-            var bodies = await Task.WhenAll(responses.Select(PaymentTestSetup.BodyAsync));
+            responses.ShouldAllBe(x => x.StatusCode == HttpStatusCode.Accepted || x.StatusCode == HttpStatusCode.Conflict);
+            foreach (var pending in responses.Where(x => x.StatusCode == HttpStatusCode.Conflict))
+            {
+                pending.Headers.RetryAfter!.Delta.ShouldBe(TimeSpan.FromSeconds(1));
+                (await PaymentTestSetup.BodyAsync(pending)).GetProperty("type").GetString().ShouldBe("urn:ledgerline:problem:request-in-progress");
+            }
+            using var replay = await PaymentTestSetup.TransferAsync(client, from, to, key: "concurrent");
+            replay.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+            var bodies = await Task.WhenAll(responses.Where(x => x.StatusCode == HttpStatusCode.Accepted).Append(replay).Select(PaymentTestSetup.BodyAsync));
             bodies.Select(x => x.GetProperty("id").GetGuid()).Distinct().Count().ShouldBe(1);
             await using var scope = host.Services.CreateAsyncScope();
             (await scope.ServiceProvider.GetRequiredService<Ledgerline.Payments.Infrastructure.PaymentsDbContext>().Payments.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(1);

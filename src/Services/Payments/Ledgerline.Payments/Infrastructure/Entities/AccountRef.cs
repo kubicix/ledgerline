@@ -7,4 +7,5 @@ public sealed class AccountRef
     public string Type { get; set; } = "";
     public string Currency { get; set; } = "";
     public string Status { get; set; } = "";
+    public int StatusVersion { get; set; }
 }

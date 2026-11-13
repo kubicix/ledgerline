@@ -11,7 +11,9 @@ public sealed record CreateTopUpRequest(Guid AccountId, long AmountMinor, string
 internal static class CreateTopUpEndpoint
 {
     internal static Task<IResult> HandleAsync(CreateTopUpRequest request, HttpContext http, PaymentsDbContext db,
-        SagaRunner runner, ICurrentUser user, IClock clock, CancellationToken ct) =>
-        CreatePayment.HandleAsync(PaymentKind.TopUp, null, request.AccountId, request.AmountMinor, request.Currency,
-            request.CardToken, http, db, runner, user, clock, ct);
+        SagaRunner runner, ICurrentUser user, IClock clock, PaymentSagaOptions options, CancellationToken ct)
+    {
+        return CreatePayment.HandleAsync(PaymentKind.TopUp, null, request.AccountId, request.AmountMinor, request.Currency,
+            request.CardToken, http, db, runner, user, clock, ct, requireCardToken: options.BankEnabled);
+    }
 }

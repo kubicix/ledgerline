@@ -1,6 +1,7 @@
 using Ledgerline.Accounts.Infrastructure;
 using Ledgerline.Accounts.Features.LedgerCommands;
 using Ledgerline.Accounts.Features.Accounts;
+using Ledgerline.Accounts.Features.Ledger;
 using Ledgerline.Accounts.Ledger;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
@@ -29,14 +30,18 @@ builder.Services.AddDbContext<AccountsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<EventStore>();
 builder.Services.AddScoped<ILedger, Ledgerline.Accounts.Ledger.Ledger>();
+builder.Services.AddScoped<Holds>();
 builder.Services.AddScoped<LedgerOperationRunner>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<LedgerOperationRunner>());
 builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging => messaging.Service("accounts")
-    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>());
+    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>()
+    .Consume<ReserveFunds, ReserveFundsHandler>().Consume<CaptureFunds, CaptureFundsHandler>().Consume<ReleaseFunds, ReleaseFundsHandler>()
+    .Consume<RefundFunds, RefundFundsHandler>());
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
 app.MapAccountsEndpoints();
+app.MapTrialBalanceEndpoint();
 
 app.Run();
 

@@ -382,7 +382,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 - [x] Concurrent transfers proven (M1-T19).
 - [x] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
 - [x] README has quick start and status (M1-T25).
-- [x] Local CI-equivalent checks green; hosted CI awaits the owner pushing this branch.
+- [x] M1 PR #1 and merged main passed hosted build-test; GitGuardian passed after development-credential triage.
 
 ---
 
@@ -390,7 +390,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T01: Keycloak realm and JWT authentication
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0004; `building-blocks.md` section 9 (Auth). **Depends:** M1 complete.
 **Files:** Modify `deploy/compose/keycloak/ledgerline-realm.json` (clients `ledgerline-api` bearer-only, `ledgerline-k6` with direct access grants; audience mapper adding `ledgerline-api` to tokens of `ledgerline-web` and `ledgerline-k6`; realm roles in the `roles` claim; users `alice`, `bob` (customer), `shop` (merchant), `admin` with emails `<name>@example.test` and development passwords). Create in Web: `Auth/JwtAuthExtensions.cs`, `Auth/ClaimsCurrentUser.cs`; delete `Auth/DevHeaderAuthenticationHandler.cs`. Add `Microsoft.AspNetCore.Authentication.JwtBearer` 10.0.15. Create `tests/Ledgerline.Testing/TestTokens.cs`; modify `ServiceHost.CreateClient` to send a bearer token. Modify `compose.yaml` service environments (`Auth__Authority=http://keycloak:8081/realms/ledgerline`, `Auth__Audience=ledgerline-api`, `Auth__RequireHttpsMetadata=false`). Modify `scripts/smoke.*` to obtain tokens from Keycloak through `ledgerline-k6`. Test: modify `tests/Ledgerline.BuildingBlocks.Tests/WebDefaultsTests.cs`.
@@ -401,7 +401,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T02: Redis fast path for idempotency
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9 steps 2 and 4. **Depends:** M2-T01.
 **Files:** Create in Web `Idempotency/RedisIdempotencyStore.cs`, `Idempotency/IIdempotencyStore.cs`; modify `IdempotencyEndpointFilter.cs`, `WebDefaults.cs` (register `IConnectionMultiplexer` with `AbortOnConnectFail = false`). Test `tests/Ledgerline.Payments.IntegrationTests/IdempotencyTests.cs`.
@@ -412,7 +412,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T03: Risk rules (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` section 2. **Depends:** M1-T01.
 **Files:** Create in Risk `Domain/{RiskRule.cs,RuleCode.cs,RiskRequest.cs,RiskCounters.cs,RiskEvaluator.cs,RiskOutcome.cs}`. Test `tests/Ledgerline.Risk.Tests/RiskEvaluatorTests.cs`.
@@ -423,7 +423,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T04: Risk service: schema, evaluate handler, daily totals
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` sections 3, 4 (steps 1, 2, 4, 5, 6), 6, 7. **Depends:** M2-T03, M1-T10.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Risk/{EvaluateRisk.cs,RiskApproved.cs,RiskRejected.cs}` plus samples; in Risk `Infrastructure/{RiskDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs,RuleCache.cs}`, `Features/Evaluate/EvaluateRiskHandler.cs`, `Features/Evaluate/IVelocityCounter.cs`, `Features/Evaluate/DatabaseVelocityCounter.cs`; modify `Program.cs`. Create `tests/Ledgerline.Risk.IntegrationTests/` project (add to solution; `tests/Directory.Build.props` applies) with `EvaluateRiskTests.cs`.**Produces:** `IVelocityCounter.CountAsync(Guid customerId, Guid paymentId, DateTimeOffset at, int windowSeconds, CancellationToken ct) : Task<int>`; seeded rules with the spec defaults for `TRY`, `EUR`, `USD`.
@@ -433,7 +433,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T05: Velocity windows in Redis with database fallback, Risk admin API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` section 4 step 3, section 5, section 8. **Depends:** M2-T04, M2-T01.
 **Files:** Create in Risk `Features/Evaluate/RedisVelocityCounter.cs` (Lua script as an embedded string), `Features/Evaluate/FallbackVelocityCounter.cs` (tries Redis, falls back), `Features/Rules/{ListRulesEndpoint.cs,UpdateRuleEndpoint.cs,GetDecisionEndpoint.cs}`. Test `tests/Ledgerline.Risk.IntegrationTests/{VelocityTests.cs,RiskApiTests.cs}`.
@@ -443,7 +443,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T06: Bank Simulator: operations with idempotency
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `bank-simulator.md` sections 1, 2, 3 (authorizations, capture, void, refund, operations lookup), 4. **Depends:** M1-T12.
 **Files:** Create in BankSimulator `Infrastructure/{BankDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}`, `Features/{AuthorizeEndpoint.cs,CaptureEndpoint.cs,VoidEndpoint.cs,RefundEndpoint.cs,LookupEndpoint.cs,ApiKeyFilter.cs,BankIdempotency.cs}`; modify `Program.cs`. Reference `Ledgerline.Testing` from `Ledgerline.BankSimulator.Tests`. Test `tests/Ledgerline.BankSimulator.Tests/BankOperationsTests.cs`.
@@ -453,7 +453,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T07: Bank Simulator: faults and settlement file
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `bank-simulator.md` section 3 (faults, settlement, tampering), section 5. **Depends:** M2-T06.
 **Files:** Create `Features/{FaultsEndpoint.cs,FaultState.cs,FaultMiddleware.cs,SettlementEndpoint.cs,SettlementTampering.cs}`. Test `FaultTests.cs`, `SettlementTests.cs`.
@@ -463,7 +463,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T08: Saga core: top-up with bank steps and compensation (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.1 (T1 to T10), 4.6. **Depends:** M1-T20, M2-T04.
 **Files:** Modify `Sagas/PaymentSaga.cs`, `Sagas/SagaInput.cs`; create `src/Contracts/Ledgerline.Contracts/Payments/CallBank.cs` plus sample. Test `tests/Ledgerline.Payments.Tests/TopUpSagaTests.cs`.
@@ -473,7 +473,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T09: Saga core: merchant payment, capture, void (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.2 (with risk), 4.3. **Depends:** M2-T08.
 **Files:** Modify `Sagas/PaymentSaga.cs`. Test `tests/Ledgerline.Payments.Tests/{MerchantPaymentSagaTests.cs,TransferSagaTests.cs}`.
@@ -483,7 +483,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T10: Accounts: holds (reserve, capture, release)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 4 (three commands), section 6 hold rules, invariant A7. **Depends:** M1-T16.
 **Files:** Create contracts `ReserveFunds.cs`, `CaptureFunds.cs`, `ReleaseFunds.cs` plus samples; in Accounts `Features/LedgerCommands/{ReserveFundsHandler.cs,CaptureFundsHandler.cs,ReleaseFundsHandler.cs}`, `Ledger/Holds.cs`; modify `Ledger/Ledger.cs` (hold projection updates inside `PostAsync`), `LedgerAssert.cs` (new check: `PAYMENTS_PENDING` balance equals the sum of `Active` holds per currency), `RebuildProjectionsCommand.cs` (rebuild `holds`), `AccountResponse` (`heldMinor`). Test `tests/Ledgerline.Accounts.IntegrationTests/HoldTests.cs`.
@@ -493,7 +493,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T11: Accounts: refund command, freeze and unfreeze, trial balance
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 3 (freeze, unfreeze, trial balance), section 4 (`refund-funds`, `account-status-changed`). **Depends:** M2-T10, M2-T01.
 **Files:** Create contracts `RefundFunds.cs`, `AccountStatusChanged.cs` plus samples; in Accounts `Features/LedgerCommands/RefundFundsHandler.cs`, `Features/Accounts/{FreezeEndpoint.cs,UnfreezeEndpoint.cs}`, `Features/Ledger/TrialBalanceEndpoint.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/{RefundTests.cs,AdminApiTests.cs}`.
@@ -503,7 +503,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T12: Payments: bank client and call-bank handler
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.5, invariant P8. **Depends:** M2-T07, M2-T08.
 **Files:** Create in Payments `Bank/{IBankClient.cs,BankClient.cs,BankResult.cs,BankOptions.cs}`, `Features/Bank/CallBankHandler.cs`; add `Microsoft.Extensions.Http.Resilience` 10.11.0 (timeout only, no retry for POST); modify `Program.cs`. Add a project reference from `Ledgerline.Payments.IntegrationTests` to `Ledgerline.BankSimulator` and host it with `ServiceHost<Ledgerline.BankSimulator.Program>`. Test `tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs`.
@@ -514,7 +514,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T13: Payments: risk step wiring and full top-up flow
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.1, 5; `design.md` flows 10.1 and 10.5. **Depends:** M2-T12, M2-T04.
 **Files:** Create in Payments `Features/RiskReplies/{RiskApprovedHandler.cs,RiskRejectedHandler.cs}`, `Features/AccountReplica/AccountStatusChangedHandler.cs`; modify `Program.cs` (`RiskEnabled = true`, `BankEnabled = true` from configuration, default true), `CreateTopUpEndpoint.cs` (`cardToken`). Test `tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs` (probe plays Risk and Accounts; Bank Simulator is real).
@@ -524,7 +524,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T14: Payments: merchant payment endpoints, capture, void, expiry
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3, 4.3, 4.6 (expiry), invariants P1, P2. **Depends:** M2-T09, M2-T10, M2-T13.
 **Files:** Create contracts `PaymentAuthorized.cs`, `PaymentCaptured.cs`, `PaymentVoided.cs` plus samples; in Payments `Features/Payments/{CreatePaymentEndpoint.cs,CapturePaymentEndpoint.cs,VoidPaymentEndpoint.cs,ListPaymentsEndpoint.cs}`. Test `tests/Ledgerline.Payments.IntegrationTests/MerchantPaymentFlowTests.cs`.
@@ -534,7 +534,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T15: Payments: refunds
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3, 4.4. **Depends:** M2-T14, M2-T11.
 **Files:** Create contract `PaymentRefunded.cs` plus sample; in Payments `Features/Refunds/{CreateRefundEndpoint.cs,ListRefundsEndpoint.cs,RefundSaga.cs,RefundResponse.cs}`; modify the ledger reply handlers to route by `operationId` to a refund when no payment step matches. Test `tests/Ledgerline.Payments.Tests/RefundSagaTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/RefundFlowTests.cs`.
@@ -544,7 +544,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T16: Notifications: recipients, handlers, sender, API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `notifications.md` (all, except the Phase 2 row). **Depends:** M2-T14, M2-T15.
 **Files:** In Notifications: `Infrastructure/{NotificationsDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}`, `Features/Recipients/AccountOpenedHandler.cs`, `Features/PaymentEvents/*.cs` (one handler per consumed type, sharing `NotificationPlanner`), `Templates/{TemplateRenderer.cs,Templates.cs}`, `Sending/{NotificationSender.cs,IEmailSender.cs,SmtpEmailSender.cs}`, `Features/List/ListNotificationsEndpoint.cs`; modify `Program.cs`. SMTP: Microsoft's documentation recommends against `System.Net.Mail.SmtpClient` for new code. Use MailKit: first check its current version and license on nuget.org and add the row to ADR 0000. Create `tests/Ledgerline.Notifications.IntegrationTests/` project. Tests `tests/Ledgerline.Notifications.Tests/TemplateTests.cs`, `tests/Ledgerline.Notifications.IntegrationTests/NotificationFlowTests.cs` (fake `IEmailSender` recording sends; one test uses a Mailpit container and its HTTP API).
@@ -554,7 +554,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T17: Timeouts complete: attempt accounting during outages
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.6 and 9 (last paragraph). **Depends:** M2-T13.
 **Files:** Modify `Sagas/SagaTimeoutPoller.cs`, `Sagas/SagaRunner.cs` (store the `message_id` of the last command sent for the step on the payment or timeout row). Test `tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs` (extend).
@@ -565,7 +565,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T18: Gateway
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `gateway.md`. **Depends:** M2-T01.
 **Files:** In Gateway: `Program.cs`, `appsettings.json` (routes and clusters of the spec, Phase 2 routes left out), `CorrelationIdMiddleware.cs`, `RateLimiting.cs`. Add `Yarp.ReverseProxy` 2.3.0. Reference `Ledgerline.Testing` from `Ledgerline.Gateway.Tests`. Test `tests/Ledgerline.Gateway.Tests/GatewayTests.cs` (stub upstreams: in-test Kestrel servers that echo method, path, and headers).
@@ -575,7 +575,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T19: Compose for the whole system, architecture rules, README
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0005; `design.md` section 5. **Depends:** M2-T16, M2-T17, M2-T18.
 **Files:** Create Dockerfiles for Risk, Notifications, BankSimulator, Gateway; modify `compose.yaml` (profile `app`: all services with migrate jobs, gateway on host port 8080, service host ports removed except the gateway; `deploy/compose/postgres/init-databases.sql` unchanged); modify `scripts/smoke.*` (through the gateway with Keycloak tokens: open wallets for `alice`, `bob`, `shop`; top-up with `tok_ok`; transfer; merchant payment with manual capture; partial refund; assert balances and that Mailpit received at least 4 emails; assert trial balance zero as `admin`). Modify `tests/Ledgerline.ArchitectureTests/ServiceIsolationTests.cs`: add `Consumers_are_registered_only_through_MessagingBuilder` (no type outside `Ledgerline.BuildingBlocks.Messaging` references `RabbitMQ.Client`), `Only_ledger_namespace_writes_account_balances` (the `BalanceMinor` setter of the account entity is `private`; the only mutating method is `ApplyPosting(Direction, long)`; the test asserts by reflection that the setter is private and that no public or internal method other than `ApplyPosting` exists on the entity that takes an amount), `Amounts_are_never_floating_point` (no property or parameter named `*Amount*` or `*Minor*` of type `decimal`, `double`, `float` in any Ledgerline assembly). Modify `README.md` (M2 status, full architecture diagram, flows link).
@@ -584,14 +584,14 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ## Milestone 2 checklist
 
-- [ ] Saga with compensation works and is tested: `TopUpFlowTests`, `BankCallTests` (M2-T12, M2-T13).
-- [ ] Risk and Notifications run as separate services (M2-T04, M2-T05, M2-T16).
-- [ ] Gateway is the only public entry (M2-T18, M2-T19).
-- [ ] Real authentication through Keycloak; no dev header path remains (M2-T01).
-- [ ] One command still starts everything (M2-T19). **DoD: one command**
-- [ ] Architecture diagram in README matches the running system (M2-T19). **DoD: architecture diagram**
-- [ ] `payment captures at most once` proven: `Capture_and_void_race_has_exactly_one_winner`, `HoldTests` (M2-T10, M2-T14).
-- [ ] CI green on the last commit.
+- [x] Saga with compensation works and is tested: `TopUpFlowTests`, `BankCallTests` (M2-T12, M2-T13).
+- [x] Risk and Notifications run as separate services (M2-T04, M2-T05, M2-T16).
+- [x] Gateway is the only public entry (M2-T18, M2-T19).
+- [x] Real authentication through Keycloak; no dev header path remains (M2-T01).
+- [x] One command still starts everything (M2-T19). **DoD: one command**
+- [x] Architecture diagram in README matches the running system (M2-T19). **DoD: architecture diagram**
+- [x] `payment captures at most once` proven: `Capture_and_void_race_has_exactly_one_winner`, `HoldTests` (M2-T10, M2-T14).
+- CI merge gate: [PR #2 checks](https://github.com/kubicix/ledgerline/pull/2) must be green before merge.
 
 ---
 

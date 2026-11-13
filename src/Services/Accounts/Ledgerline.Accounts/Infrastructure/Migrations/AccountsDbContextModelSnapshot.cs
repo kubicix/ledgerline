@@ -98,6 +98,34 @@ namespace Ledgerline.Accounts.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ledgerline.Accounts.Infrastructure.Entities.AccountStatusRequest", b =>
+                {
+                    b.Property<Guid>("CallerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("caller_id");
+
+                    b.Property<string>("Key")
+                        .HasColumnType("text")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("request_hash");
+
+                    b.HasKey("CallerId", "Key");
+
+                    b.ToTable("account_status_requests", (string)null);
+                });
+
             modelBuilder.Entity("Ledgerline.Accounts.Infrastructure.Entities.Hold", b =>
                 {
                     b.Property<Guid>("PaymentId")

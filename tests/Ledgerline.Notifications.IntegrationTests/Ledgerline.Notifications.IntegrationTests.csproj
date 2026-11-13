@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Notifications/Ledgerline.Notifications/Ledgerline.Notifications.csproj" />
+    <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
+  </ItemGroup>
+</Project>

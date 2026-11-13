@@ -10,6 +10,12 @@ public static class ModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         MapOutbox(modelBuilder);
+        return modelBuilder.AddInbox();
+    }
+
+    public static ModelBuilder AddInbox(this ModelBuilder modelBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(modelBuilder);
         var inbox = modelBuilder.Entity<InboxMessage>();
         inbox.ToTable("inbox_messages");
         inbox.HasKey(x => new { x.MessageId, x.Consumer });

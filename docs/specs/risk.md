@@ -66,8 +66,10 @@ Inside the consumer pipeline's transaction:
    window, adds the member, sets the key TTL to the window, and returns the count.
    Adding the same `paymentId` twice does not increase the count.
    **Redis unavailable:** fall back to
-   `SELECT count(*) FROM risk_decisions WHERE customer_id = @c AND evaluated_at > now() - window`
+   `SELECT count(*) FROM risk_decisions WHERE customer_id = @c AND requested_at > @requestedAt - window`
    plus one for the current evaluation. Slower, still correct.
+   The durable count is also a lower bound when Redis is healthy, so reconnecting
+   or expiring a cache cannot forget evaluations committed during an outage.
 4. `MaxSingleAmount`: compare.
 5. `DailyAmountLimit`: `SELECT ... FROM daily_totals WHERE (customer_id, day, currency) = ... FOR UPDATE`
    (insert the row first with `ON CONFLICT DO NOTHING`). Reject if
@@ -76,6 +78,9 @@ Inside the consumer pipeline's transaction:
    reply. Commit.
 
 The day is `requestedAt` in UTC.
+Persist request time at millisecond precision, matching Redis scores. Evaluation
+is serialized by customer across currencies and days before reading counters and
+inserting the decision. Evaluation time remains a separate audit timestamp.
 
 ## 5. HTTP API (admin only)
 
@@ -113,7 +118,8 @@ CREATE TABLE risk_decisions (
     currency     char(3)     NOT NULL,
     outcome      text        NOT NULL,
     rule_codes   text[]      NOT NULL DEFAULT '{}',
-    evaluated_at timestamptz NOT NULL
+    evaluated_at timestamptz NOT NULL,
+    requested_at timestamptz NOT NULL
 );
 CREATE INDEX ix_decisions_customer_time ON risk_decisions (customer_id, evaluated_at DESC);
 

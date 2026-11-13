@@ -211,9 +211,10 @@ Graceful shutdown: stop consuming (`BasicCancel`), wait for in-flight handlers u
 64 characters from `[A-Za-z0-9_-]`. Scope: the caller (`sub` claim) plus the key.
 
 1. Compute `request_hash = SHA-256(method + path + canonical JSON body)`.
-2. Redis fast path, key `idem:<service>:<sub>:<key>`, TTL 24 h:
-   - `SET NX` with value `in-progress:<request_hash>` succeeds: continue.
-   - Existing value `in-progress:<same hash>`: return `409 request-in-progress`.
+2. Redis fast path, key `idem:<service>:<sub>:<key>`:
+   - `SET NX` with value `in-progress:<request_hash>:<leaseId>` and a 30-second
+     lease succeeds: continue. A crashed owner cannot block retries for a day.
+   - Existing value `in-progress:<same hash>:<leaseId>`: return `409 request-in-progress`.
    - Existing value `done:<hash>:<resourceId>` with the same hash: load the resource
      and return it with the original success status.
    - Any existing value with a different hash: `422 idempotency-key-reused`.
@@ -221,7 +222,10 @@ Graceful shutdown: stop consuming (`BasicCancel`), wait for in-flight handlers u
 3. The database is the guarantee: the resource row stores `idempotency_key` and
    `request_hash` under a unique `(owner_id, idempotency_key)` constraint. A unique
    violation means "already created": load, compare hash, respond as in step 2.
-4. After commit, set the Redis value to `done:<hash>:<resourceId>`.
+4. After commit, compare the unique lease identity and set the Redis value to
+   `done:<hash>:<resourceId>` with a 24-hour TTL. Completion and release may affect
+   only the caller's own lease. After lease expiry, database uniqueness, replay and
+   transaction locks remain authoritative, including when an older request is still running.
 
 A replayed request returns the current representation of the resource, not a stored
 copy of the first response body. The status code is the original one (`201` or `202`).

@@ -103,7 +103,8 @@ public sealed class MigrationTests(InfrastructureFixture infrastructure)
         await using var db = OpenDb(cs);
         (await db.Accounts.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(6);
         (await db.Events.CountAsync(TestContext.Current.CancellationToken)).ShouldBe(6);
-        (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).Count().ShouldBe(2);
+        (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken))
+            .ShouldBe(db.Database.GetMigrations());
     }
 
     [Fact]

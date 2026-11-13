@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
   </ItemGroup>
 </Project>

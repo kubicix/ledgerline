@@ -7,6 +7,12 @@ public sealed class RabbitMqConnection(RabbitMqOptions options) : IAsyncDisposab
     private readonly SemaphoreSlim gate = new(1, 1);
     private IConnection? connection;
 
+    public async Task<bool> IsReadyAsync(CancellationToken ct)
+    {
+        await using var channel = await CreateChannelAsync(false, ct);
+        return channel.IsOpen;
+    }
+
     public async Task<IChannel> CreateChannelAsync(bool publisherConfirms, CancellationToken ct)
     {
         await gate.WaitAsync(ct);

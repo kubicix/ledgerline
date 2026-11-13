@@ -144,6 +144,10 @@ namespace Ledgerline.Payments.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<int>("StatusVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("status_version");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasColumnType("text")
@@ -394,13 +398,25 @@ namespace Ledgerline.Payments.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("CommandMessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("command_message_id");
+
                     b.Property<DateTimeOffset>("DueAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");
 
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_ms");
+
                     b.Property<Guid>("PaymentId")
                         .HasColumnType("uuid")
                         .HasColumnName("payment_id");
+
+                    b.Property<Guid?>("RefundId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("refund_id");
 
                     b.Property<string>("Step")
                         .IsRequired()

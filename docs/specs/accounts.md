@@ -166,8 +166,14 @@ if the customer account is frozen (money returns to its owner).
 `accounts.event.account-status-changed.v1`
 
 ```json
-{ "accountId": "...", "status": "Frozen", "changedAt": "2026-11-13T11:00:00Z" }
+{ "accountId": "...", "status": "Frozen", "changedAt": "2026-11-13T11:00:00Z", "version": 2 }
 ```
+
+Status events carry the monotonic account stream version. Payments applies only a
+newer version, acknowledging obsolete events without changing its replica.
+Successful freeze/unfreeze requests, including no-ops, retain caller/key/hash and
+account identity in `account_status_requests`. Replays return the original 204
+without reapplying the action. Their key scope is shared with account creation.
 
 `accounts.event.journal-entry-posted.v1`
 

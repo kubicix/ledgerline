@@ -30,6 +30,11 @@ Final statuses: `Completed`, `Voided`, `Compensated`, `Rejected`, `Failed`,
 UUIDv5(namespace = `paymentId`, name = step name), and for refunds
 UUIDv5(namespace = `refundId`, name = `"RefundFunds"`). Retries reuse it by construction.
 
+An explicit merchant capture uses UUIDv5(namespace = `paymentId`, name =
+`"LedgerCapture:" + Idempotency-Key`). A new capture request after a rejected attempt
+gets a new operation ID; retries of the same request retain it. Automatic capture
+uses the step-name ID. The chosen ID is stored with the capture's `Started` audit row.
+
 Bank idempotency keys: `"<paymentId>:authorize"`, `":capture"`, `":void"`, `":refund"`.
 
 ## 3. HTTP API
@@ -194,6 +199,12 @@ returns the same result.
 `saga_timeouts` rows are deleted when their step completes. The timeout poller runs
 every second and uses `FOR UPDATE SKIP LOCKED`.
 
+Refunds also have durable publication-aware timeout rows, correlated by `refund_id`.
+An unanswered refund command is resent with the same refund operation ID, with
+backoff capped at five minutes. The refund remains Processing and reserves its
+pending capacity until a definitive ledger reply; transport exhaustion alone
+cannot establish failure. A definitive reply removes its timeout rows.
+
 Entering `ManualReview` increments `ledgerline.saga.manual_review` and publishes
 `payment-failed` with `status = ManualReview`. Nothing moves automatically afterwards.
 
@@ -309,7 +320,8 @@ CREATE TABLE account_refs (                      -- replica of Accounts data
     owner_id    uuid    NOT NULL,
     type        text    NOT NULL,
     currency    char(3) NOT NULL,
-    status      text    NOT NULL
+    status      text    NOT NULL,
+    status_version int  NOT NULL DEFAULT 0
 );
 
 -- plus outbox_messages and inbox_messages from building-blocks.md

@@ -14,6 +14,14 @@ public static class MessagingServiceCollectionExtensions
 {
     public static IServiceCollection AddLedgerlineMessaging<TDbContext>(this IServiceCollection services,
         IConfiguration configuration, Action<MessagingBuilder> configure) where TDbContext : DbContext
+        => AddMessaging<TDbContext>(services, configuration, configure, true);
+
+    public static IServiceCollection AddLedgerlineInbox<TDbContext>(this IServiceCollection services,
+        IConfiguration configuration, Action<MessagingBuilder> configure) where TDbContext : DbContext
+        => AddMessaging<TDbContext>(services, configuration, configure, false);
+
+    private static IServiceCollection AddMessaging<TDbContext>(IServiceCollection services,
+        IConfiguration configuration, Action<MessagingBuilder> configure, bool useOutbox) where TDbContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -26,23 +34,26 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton(types);
         services.AddSingleton(handlers);
         RegisterOptions(services, configuration, builder.ServiceName);
-        RegisterRuntime<TDbContext>(services);
+        RegisterRuntime<TDbContext>(services, useOutbox);
         return services;
     }
 
-    private static void RegisterRuntime<TDbContext>(IServiceCollection services) where TDbContext : DbContext
+    private static void RegisterRuntime<TDbContext>(IServiceCollection services, bool useOutbox) where TDbContext : DbContext
     {
         services.TryAddSingleton<IClock, SystemClock>();
         services.TryAddSingleton<ICrashPoint, NoCrashPoint>();
         services.TryAddSingleton<IAckStrategy, DefaultAckStrategy>();
-        services.TryAddSingleton<OutboxSignal>();
         services.TryAddSingleton<RabbitMqConnection>();
-        services.TryAddSingleton<IOutboxPublisher, RabbitMqOutboxPublisher>();
-        services.TryAddScoped<IOutbox, EfOutbox<TDbContext>>();
-        services.TryAddScoped<OutboxSaveChangesInterceptor>();
-        services.AddDbContext<TDbContext>((sp, options) => options.AddInterceptors(sp.GetRequiredService<OutboxSaveChangesInterceptor>()));
+        if (useOutbox)
+        {
+            services.TryAddSingleton<OutboxSignal>();
+            services.TryAddSingleton<IOutboxPublisher, RabbitMqOutboxPublisher>();
+            services.TryAddScoped<IOutbox, EfOutbox<TDbContext>>();
+            services.TryAddScoped<OutboxSaveChangesInterceptor>();
+            services.AddDbContext<TDbContext>((sp, options) => options.AddInterceptors(sp.GetRequiredService<OutboxSaveChangesInterceptor>()));
+            services.AddHostedService<OutboxRelay<TDbContext>>();
+        }
         services.AddHostedService<MessagingTopologyInitializer>();
-        services.AddHostedService<OutboxRelay<TDbContext>>();
         services.AddHostedService<ConsumerHost<TDbContext>>();
         services.AddHostedService<MessagingRetentionJob<TDbContext>>();
     }

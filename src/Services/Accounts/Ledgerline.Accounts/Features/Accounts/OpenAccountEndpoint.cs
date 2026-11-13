@@ -19,6 +19,8 @@ public static class AccountsEndpoints
         app.MapGet("/accounts", ListAccountsEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}", GetAccountEndpoint.HandleAsync).RequireAuthorization();
         app.MapGet("/accounts/{id:guid}/entries", ListEntriesEndpoint.HandleAsync).RequireAuthorization();
+        app.MapPost("/accounts/{id:guid}/freeze", FreezeEndpoint.HandleAsync).RequireAuthorization(Policies.Admin).RequireIdempotencyKey();
+        app.MapPost("/accounts/{id:guid}/unfreeze", UnfreezeEndpoint.HandleAsync).RequireAuthorization(Policies.Admin).RequireIdempotencyKey();
         return app;
     }
 }
@@ -32,11 +34,16 @@ internal static class OpenAccountEndpoint
     {
         var key = (string)http.Items[IdempotencyEndpointFilter.KeyItem]!;
         var hash = (string)http.Items[IdempotencyEndpointFilter.HashItem]!;
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AccountRequestKey.LockAsync(db, user.Id, key, ct);
+        if (await db.StatusRequests.AnyAsync(x => x.CallerId == user.Id && x.Key == key, ct)) return ProblemResults.IdempotencyKeyReused();
         try
         {
-            return await IdempotentCreate.ExecuteAsync(hash,
+            var result = await IdempotentCreate.ExecuteAsync(hash,
                 () => CreateAsync(request, db, user, clock, outbox, configuration, key, hash, ct),
                 () => FindExistingAsync(db, user.Id, key, ct), IsUniqueViolation);
+            if (result is IStatusCodeHttpResult { StatusCode: >= 200 and < 300 }) await transaction.CommitAsync(ct);
+            return result;
         }
         catch (DbUpdateException error) when (IsUniqueViolation(error))
         {
@@ -87,7 +94,7 @@ internal static class OpenAccountEndpoint
         db.Events.Add(new LedgerEvent
         {
             StreamId = account.Id, Version = 1, Type = "account-opened.v1", OccurredAt = account.OpenedAt,
-            Data = EnvelopeSerializer.ToPayload(new Ledger.AccountOpened(account.OwnerId, account.Type, null, account.Currency, account.ContactEmail)),
+            Data = EnvelopeSerializer.ToPayload(new Ledgerline.Accounts.Ledger.AccountOpened(account.OwnerId, account.Type, null, account.Currency, account.ContactEmail)),
             Metadata = EnvelopeSerializer.ToPayload(new { CorrelationId = account.Id, CausationId = (Guid?)null,
                 OperationId = (Guid?)null, account.IdempotencyKey, account.RequestHash })
         });
