@@ -9,4 +9,7 @@ public abstract record SagaEffect
     public sealed record SetBankAuthorizationId(string Id) : SagaEffect;
     public sealed record SetBankCaptureId(string Id) : SagaEffect;
     public sealed record ClearCardToken : SagaEffect;
+    public sealed record SetAuthorizationExpiresAt(DateTimeOffset? At) : SagaEffect;
+    public sealed record SetCaptureRequestedMinor(long? AmountMinor) : SagaEffect;
+    public sealed record SetCapturedMinor(long AmountMinor) : SagaEffect;
 }

@@ -473,7 +473,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T09: Saga core: merchant payment, capture, void (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.2 (with risk), 4.3. **Depends:** M2-T08.
 **Files:** Modify `Sagas/PaymentSaga.cs`. Test `tests/Ledgerline.Payments.Tests/{MerchantPaymentSagaTests.cs,TransferSagaTests.cs}`.

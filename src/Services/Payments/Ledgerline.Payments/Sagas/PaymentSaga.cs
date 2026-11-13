@@ -4,7 +4,7 @@ using Ledgerline.Contracts.Risk;
 
 namespace Ledgerline.Payments.Sagas;
 
-public static class PaymentSaga
+public static partial class PaymentSaga
 {
     public static SagaDecision Start(PaymentSnapshot payment, DateTimeOffset now) => Start(payment, now, new());
 
@@ -15,7 +15,8 @@ public static class PaymentSaga
         {
             PaymentKind.Transfer => SagaStep.LedgerTransfer,
             PaymentKind.TopUp => options.BankEnabled ? SagaStep.BankAuthorize : SagaStep.LedgerCredit,
-            _ => throw new NotSupportedException("Merchant payment steps are introduced in Milestone 2.")
+            PaymentKind.MerchantPayment => SagaStep.LedgerReserve,
+            _ => throw new NotSupportedException("Unsupported payment kind.")
         };
         return Send(payment, step, now, cancelTimeouts: false);
     }
@@ -24,7 +25,12 @@ public static class PaymentSaga
 
     public static SagaDecision Decide(PaymentSnapshot payment, SagaInput input, DateTimeOffset now, PaymentSagaOptions options)
     {
+        if (payment.Kind == PaymentKind.MerchantPayment && input is SagaInput.CaptureRequested or SagaInput.VoidRequested)
+            return OnMerchantRequest(payment, input, now);
         if (IsFinal(payment.Status)) return Ignore(payment);
+        if (payment.Kind == PaymentKind.MerchantPayment && payment.Status == PaymentStatus.Authorized &&
+            (input is SagaInput.AuthorizationExpired || input is SagaInput.StepTimedOut { Step: SagaStep.None }))
+            return BeginVoid(payment, now, "Expired");
         if (input is SagaInput.StepTimedOut timeout && timeout.Step == payment.Step)
             return OnTimeout(payment, now, options);
         if (payment.Step == SagaStep.RiskCheck && payment.Status == PaymentStatus.Processing)
@@ -34,6 +40,7 @@ public static class PaymentSaga
             var bank = OnBank(payment, input, now);
             if (!bank.Ignored) return bank;
         }
+        if (payment.Kind == PaymentKind.MerchantPayment) return OnMerchantLedger(payment, input, now);
         if (payment.Step is not (SagaStep.LedgerCredit or SagaStep.LedgerTransfer)) return Ignore(payment);
         if (payment.Status != PaymentStatus.Processing) return Ignore(payment);
         var operationId = OperationIds.For(payment.Id, payment.Step);
@@ -76,14 +83,23 @@ public static class PaymentSaga
             payment.SourceAccountId!.Value, payment.DestinationAccountId, payment.AmountMinor, payment.Currency),
         SagaStep.LedgerCredit => new CreditTopUp(OperationIds.For(payment.Id, step), payment.Id,
             payment.DestinationAccountId, payment.AmountMinor, payment.Currency),
+        SagaStep.LedgerReserve => new ReserveFunds(OperationIds.For(payment.Id, step), payment.Id,
+            payment.SourceAccountId!.Value, payment.AmountMinor, payment.Currency),
+        SagaStep.LedgerCapture => new CaptureFunds(OperationIds.For(payment.Id, step), payment.Id,
+            payment.DestinationAccountId, payment.CaptureRequestedMinor ?? payment.AmountMinor),
+        SagaStep.LedgerRelease => new ReleaseFunds(OperationIds.For(payment.Id, step), payment.Id),
         _ => throw new NotSupportedException("Unsupported saga command step.")
     };
 
     private static SagaDecision OnRisk(PaymentSnapshot payment, SagaInput input, DateTimeOffset now, PaymentSagaOptions options) => input switch
     {
         SagaInput.RiskRejected rejected => Fail(payment, PaymentStatus.Rejected, rejected.Reason, now),
-        SagaInput.RiskApproved => Send(payment, payment.Kind == PaymentKind.Transfer ? SagaStep.LedgerTransfer :
-            options.BankEnabled ? SagaStep.BankAuthorize : SagaStep.LedgerCredit, now, true),
+        SagaInput.RiskApproved => Send(payment, payment.Kind switch
+        {
+            PaymentKind.Transfer => SagaStep.LedgerTransfer,
+            PaymentKind.MerchantPayment => SagaStep.LedgerReserve,
+            _ => options.BankEnabled ? SagaStep.BankAuthorize : SagaStep.LedgerCredit
+        }, now, true),
         _ => Ignore(payment)
     };
 
