@@ -166,7 +166,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T07: Outbox relay
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 7; ADR 0003. **Depends:** M1-T04, M1-T06.
 **Files:** Create `Outbox/OutboxRelay.cs` (`BackgroundService`, generic on `TDbContext`), `Outbox/OutboxSignal.cs`, `Outbox/RelayOptions.cs`. Test `OutboxRelayTests.cs`.
