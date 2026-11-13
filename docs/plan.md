@@ -108,7 +108,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T02: Message envelope, type names, serializer
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 2, 3, 5. **Depends:** M1-T01.
 **Files:** Create in `src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/`: `MessageEnvelope.cs`, `MessageTypeAttribute.cs`, `MessageTypeRegistry.cs`, `EnvelopeSerializer.cs`, `MessageContext.cs`, `IMessageHandler.cs`. Test `tests/Ledgerline.BuildingBlocks.Tests/EnvelopeTests.cs`; add a project reference from that test project to the Messaging project.
