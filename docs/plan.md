@@ -257,7 +257,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T15: Ledger posting core
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 6 steps 3 to 6, section 7; ADR 0007. **Depends:** M1-T13, M1-T14.
 **Files:** Create `Ledger/ILedger.cs`, `Ledger/Ledger.cs`, `Ledger/EventStore.cs`, `Ledger/LedgerEvents.cs`; `tests/Ledgerline.Testing/LedgerAssert.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/LedgerPostingTests.cs` (tests insert wallets directly through a small test helper `TestAccounts.OpenWalletAsync(db, ownerId, currency, type)` that appends the `account-opened.v1` event and projection row).
