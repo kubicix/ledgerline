@@ -224,7 +224,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T12: Web defaults (problem details, dev auth, health)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9. **Depends:** none.
 **Files:** Create in `src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/`: `WebDefaults.cs`, `Problems/ProblemCodes.cs`, `Problems/ProblemResults.cs`, `Auth/DevHeaderAuthenticationHandler.cs`, `Auth/CurrentUser.cs`, `Auth/Policies.cs`, `Health/HealthEndpoints.cs`, `Pagination/Page.cs`. Add `Microsoft.AspNetCore.Mvc.Testing` 10.0.15. Reference Web and Mvc.Testing from `tests/Ledgerline.BuildingBlocks.Tests`; test `WebDefaultsTests.cs` using a minimal in-test `WebApplication`.
