@@ -235,7 +235,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T13: Accounts database, migration, system accounts, migrate command
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` sections 2, 5, 10. **Depends:** M1-T04, M1-T12.
 **Files:** Create in Accounts project: `Infrastructure/AccountsDbContext.cs`, `Infrastructure/Entities/*.cs` (one per table), `Infrastructure/Migrations/` (EF migration `Initial`), `Infrastructure/SystemAccounts.cs`, `Infrastructure/MigrateCommand.cs`; modify `Program.cs` (web defaults, DbContext, `args[0] == "migrate"` branch). Create `tests/Ledgerline.Testing/ServiceHost.cs`, `DatabaseFactory.cs`. Reference `Ledgerline.Testing` from `Ledgerline.Accounts.IntegrationTests`. Test `MigrationTests.cs`.

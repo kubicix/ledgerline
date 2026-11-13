@@ -14,8 +14,10 @@
     <PackageReference Include="StackExchange.Redis" />
     <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
 </Project>
+
 
 
 
