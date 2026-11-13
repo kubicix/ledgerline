@@ -96,7 +96,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T01: Money, Ids, clock
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 1. **Depends:** none.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks/{Money.cs,CurrencyMismatchException.cs,Ids.cs,IClock.cs,SystemClock.cs}`. Test `tests/Ledgerline.BuildingBlocks.Tests/MoneyTests.cs`.
