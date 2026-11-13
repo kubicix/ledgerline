@@ -86,8 +86,13 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
                 db.SagaTimeouts.RemoveRange(await db.SagaTimeouts.Where(x => x.PaymentId == payment.Id).ToListAsync(ct));
                 break;
             case SagaEffect.ScheduleTimeout timeout:
-                var after = timeout.Step is SagaStep.LedgerCredit or SagaStep.LedgerTransfer
-                    ? TimeSpan.FromMilliseconds(timeoutOptions.StepTimeoutMs) : timeout.After;
+                var after = timeout.Step switch
+                {
+                    SagaStep.LedgerCredit or SagaStep.LedgerTransfer or SagaStep.LedgerReserve or SagaStep.LedgerCapture or SagaStep.LedgerRelease =>
+                        TimeSpan.FromMilliseconds(timeoutOptions.StepTimeoutMs),
+                    SagaStep.BankVoid or SagaStep.BankRefund when timeoutOptions.CompensationTimeoutMs is { } milliseconds => TimeSpan.FromMilliseconds(milliseconds),
+                    _ => timeout.After
+                };
                 db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step, DueAt = clock.UtcNow + after });
                 break;
             default:

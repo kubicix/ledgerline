@@ -514,7 +514,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T13: Payments: risk step wiring and full top-up flow
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 4.1, 5; `design.md` flows 10.1 and 10.5. **Depends:** M2-T12, M2-T04.
 **Files:** Create in Payments `Features/RiskReplies/{RiskApprovedHandler.cs,RiskRejectedHandler.cs}`, `Features/AccountReplica/AccountStatusChangedHandler.cs`; modify `Program.cs` (`RiskEnabled = true`, `BankEnabled = true` from configuration, default true), `CreateTopUpEndpoint.cs` (`cardToken`). Test `tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs` (probe plays Risk and Accounts; Bank Simulator is real).

@@ -149,4 +149,13 @@ public sealed class TopUpSagaTests
         decision.Step.ShouldBe(SagaStep.LedgerCredit);
         Command<CreditTopUp>(decision).AmountMinor.ShouldBe(2500);
     }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Risk_rejection_or_exhaustion_discards_card_token(bool timeout)
+    {
+        var payment = Payment(SagaStep.RiskCheck) with { StepAttempt = 5 };
+        var decision = Decide(payment, timeout ? new SagaInput.StepTimedOut(SagaStep.RiskCheck) : new SagaInput.RiskRejected("VelocityLimit"));
+        decision.Effects.OfType<SagaEffect.ClearCardToken>().Count().ShouldBe(1);
+    }
 }

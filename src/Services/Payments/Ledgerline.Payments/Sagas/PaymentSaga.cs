@@ -108,7 +108,7 @@ public static partial class PaymentSaga
         (PaymentStatus.Processing, SagaStep.BankAuthorize, SagaInput.BankAuthorized authorized) =>
             AddEffects(Send(payment, SagaStep.BankCapture, now, true), new SagaEffect.SetBankAuthorizationId(authorized.Id), new SagaEffect.ClearCardToken()),
         (PaymentStatus.Processing, SagaStep.BankAuthorize, SagaInput.BankDeclined declined) =>
-            AddEffects(Fail(payment, PaymentStatus.Failed, "BankDeclined:" + declined.Code, now), new SagaEffect.ClearCardToken()),
+            Fail(payment, PaymentStatus.Failed, "BankDeclined:" + declined.Code, now),
         (PaymentStatus.Processing, SagaStep.BankCapture, SagaInput.BankCaptured captured) =>
             AddEffects(Send(payment, SagaStep.LedgerCredit, now, true), new SagaEffect.SetBankCaptureId(captured.Id)),
         (PaymentStatus.Processing, SagaStep.BankCapture, SagaInput.BankCaptureDeclined declined) =>
@@ -142,9 +142,13 @@ public static partial class PaymentSaga
         [new SagaEffect.CancelTimeouts(), new SagaEffect.PublishEvent(new PaymentCompleted(payment.Id, payment.Kind.ToString(),
             payment.CustomerId, payment.AmountMinor, payment.Currency, payment.SourceAccountId, payment.DestinationAccountId, now, payment.BankCaptureId))], null, false);
 
-    private static SagaDecision Fail(PaymentSnapshot payment, PaymentStatus status, string reason, DateTimeOffset now) => new(status, SagaStep.None,
-        [new SagaEffect.CancelTimeouts(), new SagaEffect.PublishEvent(new PaymentFailed(payment.Id, payment.Kind.ToString(),
-            payment.CustomerId, payment.AmountMinor, payment.Currency, payment.SourceAccountId, payment.DestinationAccountId, now, status.ToString(), reason))], reason, false);
+    private static SagaDecision Fail(PaymentSnapshot payment, PaymentStatus status, string reason, DateTimeOffset now)
+    {
+        List<SagaEffect> effects = [new SagaEffect.CancelTimeouts(), new SagaEffect.PublishEvent(new PaymentFailed(payment.Id, payment.Kind.ToString(),
+            payment.CustomerId, payment.AmountMinor, payment.Currency, payment.SourceAccountId, payment.DestinationAccountId, now, status.ToString(), reason))];
+        if (payment.Kind == PaymentKind.TopUp) effects.Insert(0, new SagaEffect.ClearCardToken());
+        return new(status, SagaStep.None, effects, reason, false);
+    }
 
     private static SagaDecision Ignore(PaymentSnapshot payment) => new(payment.Status, payment.Step, [], payment.FailureReason, true);
 

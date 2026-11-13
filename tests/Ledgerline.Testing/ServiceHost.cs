@@ -83,6 +83,9 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             {
                 ["ConnectionStrings:Database"] = cs,
                 ["ConnectionStrings:Redis"] = redisConnectionString,
+                // M1 fixtures retain their walking-skeleton flow; M2 flow tests explicitly enable the full saga.
+                ["Saga:RiskEnabled"] = "false",
+                ["Saga:BankEnabled"] = "false",
                 ["Messaging:RabbitMq:Uri"] = rabbitMqUri,
                 ["Auth:Mode"] = "TestKey",
                 ["Auth:Authority"] = TestTokens.Issuer,

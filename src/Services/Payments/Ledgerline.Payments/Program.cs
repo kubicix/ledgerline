@@ -13,6 +13,8 @@ using Ledgerline.Payments.Sagas;
 using Ledgerline.Payments.Bank;
 using Ledgerline.Payments.Features.Bank;
 using Ledgerline.Contracts.Payments;
+using Ledgerline.Contracts.Risk;
+using Ledgerline.Payments.Features.RiskReplies;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -30,7 +32,16 @@ builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", time
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
-builder.Services.AddSingleton(provider => provider.GetRequiredService<IConfiguration>().GetSection("Saga").Get<PaymentSagaOptions>() ?? new());
+builder.Services.AddSingleton(provider =>
+{
+    var configuration = provider.GetRequiredService<IConfiguration>();
+    return new PaymentSagaOptions
+    {
+        RiskEnabled = configuration.GetValue<bool?>("Saga:RiskEnabled") ?? true,
+        BankEnabled = configuration.GetValue<bool?>("Saga:BankEnabled") ?? true,
+        BankCompensationMaxAttempts = configuration.GetValue<int?>("Saga:BankCompensationMaxAttempts") ?? 8
+    };
+});
 builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
 builder.Services.AddHttpClient<IBankClient, BankClient>((provider, client) =>
 {
@@ -44,6 +55,8 @@ builder.Services.AddHostedService<SagaTimeoutPoller>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<SagaRunner>());
 builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration, messaging => messaging.Service("payments")
     .Consume<AccountOpened, AccountOpenedHandler>()
+    .Consume<AccountStatusChanged, AccountStatusChangedHandler>()
+    .Consume<RiskApproved, RiskApprovedHandler>().Consume<RiskRejected, RiskRejectedHandler>()
     .Consume<CallBank, CallBankHandler>()
     .Consume<LedgerOperationSucceeded, LedgerOperationSucceededHandler>()
     .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>());
