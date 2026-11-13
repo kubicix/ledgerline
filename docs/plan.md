@@ -544,7 +544,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T16: Notifications: recipients, handlers, sender, API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `notifications.md` (all, except the Phase 2 row). **Depends:** M2-T14, M2-T15.
 **Files:** In Notifications: `Infrastructure/{NotificationsDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}`, `Features/Recipients/AccountOpenedHandler.cs`, `Features/PaymentEvents/*.cs` (one handler per consumed type, sharing `NotificationPlanner`), `Templates/{TemplateRenderer.cs,Templates.cs}`, `Sending/{NotificationSender.cs,IEmailSender.cs,SmtpEmailSender.cs}`, `Features/List/ListNotificationsEndpoint.cs`; modify `Program.cs`. SMTP: Microsoft's documentation recommends against `System.Net.Mail.SmtpClient` for new code. Use MailKit: first check its current version and license on nuget.org and add the row to ADR 0000. Create `tests/Ledgerline.Notifications.IntegrationTests/` project. Tests `tests/Ledgerline.Notifications.Tests/TemplateTests.cs`, `tests/Ledgerline.Notifications.IntegrationTests/NotificationFlowTests.cs` (fake `IEmailSender` recording sends; one test uses a Mailpit container and its HTTP API).

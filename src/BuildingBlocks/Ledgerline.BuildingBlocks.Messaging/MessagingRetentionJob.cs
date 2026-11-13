@@ -26,7 +26,8 @@ public sealed partial class MessagingRetentionJob<TDbContext>(IServiceScopeFacto
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var cutoff = clock.UtcNow.AddDays(-options.Days);
-        await db.Set<OutboxMessage>().Where(x => x.ProcessedAt != null && x.ProcessedAt < cutoff).ExecuteDeleteAsync(ct);
+        if (db.Model.FindEntityType(typeof(OutboxMessage)) is not null)
+            await db.Set<OutboxMessage>().Where(x => x.ProcessedAt != null && x.ProcessedAt < cutoff).ExecuteDeleteAsync(ct);
         await db.Set<InboxMessage>().Where(x => x.ReceivedAt < cutoff).ExecuteDeleteAsync(ct);
     }
 
