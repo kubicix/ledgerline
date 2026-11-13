@@ -534,7 +534,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T15: Payments: refunds
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3, 4.4. **Depends:** M2-T14, M2-T11.
 **Files:** Create contract `PaymentRefunded.cs` plus sample; in Payments `Features/Refunds/{CreateRefundEndpoint.cs,ListRefundsEndpoint.cs,RefundSaga.cs,RefundResponse.cs}`; modify the ledger reply handlers to route by `operationId` to a refund when no payment step matches. Test `tests/Ledgerline.Payments.Tests/RefundSagaTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/RefundFlowTests.cs`.

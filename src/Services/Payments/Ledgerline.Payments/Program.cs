@@ -15,6 +15,7 @@ using Ledgerline.Payments.Features.Bank;
 using Ledgerline.Contracts.Payments;
 using Ledgerline.Contracts.Risk;
 using Ledgerline.Payments.Features.RiskReplies;
+using Ledgerline.Payments.Features.Refunds;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -32,6 +33,7 @@ builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", time
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
+builder.Services.AddScoped<RefundRunner>();
 builder.Services.AddSingleton(provider =>
 {
     var configuration = provider.GetRequiredService<IConfiguration>();
@@ -71,6 +73,8 @@ app.MapPost("/payments", CreatePaymentEndpoint.HandleAsync).RequireAuthorization
 app.MapPost("/payments/{id:guid}/capture", CapturePaymentEndpoint.HandleAsync).RequireAuthorization(Policies.Merchant).RequireIdempotencyKey();
 app.MapPost("/payments/{id:guid}/void", VoidPaymentEndpoint.HandleAsync).RequireAuthorization(policy => policy.RequireRole("merchant", "admin")).RequireIdempotencyKey();
 app.MapGet("/payments", ListPaymentsEndpoint.HandleAsync).RequireAuthorization();
+app.MapPost("/payments/{id:guid}/refunds", CreateRefundEndpoint.HandleAsync).RequireAuthorization(Policies.Merchant).RequireIdempotencyKey();
+app.MapGet("/payments/{id:guid}/refunds", ListRefundsEndpoint.HandleAsync).RequireAuthorization();
 
 app.Run();
 

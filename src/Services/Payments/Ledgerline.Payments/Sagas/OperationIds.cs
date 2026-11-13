@@ -9,6 +9,7 @@ public static class OperationIds
     public static Guid For(Guid paymentId, SagaStep step) => ForName(paymentId, step.ToString());
 
     public static Guid ForCapture(Guid paymentId, string requestKey) => ForName(paymentId, "LedgerCapture:" + requestKey);
+    public static Guid ForRefund(Guid refundId) => ForName(refundId, "RefundFunds");
 
     [SuppressMessage("Security", "CA5350", Justification = "UUIDv5 specifies SHA-1 for deterministic identifiers, not security.")]
     private static Guid ForName(Guid paymentId, string name)

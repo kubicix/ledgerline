@@ -25,6 +25,7 @@ internal static class PaymentActions
         if (previous is not null) return previous.PaymentId == id && previous.Hash == hash
             ? await AcceptedAsync(payment, db, ct) : ProblemResults.IdempotencyKeyReused();
         if (await db.Payments.AnyAsync(x => x.CustomerId == user.Id && x.IdempotencyKey == key, ct)) return ProblemResults.IdempotencyKeyReused();
+        if (await db.Refunds.AnyAsync(x => x.RequestedBy == user.Id && x.IdempotencyKey == key, ct)) return ProblemResults.IdempotencyKeyReused();
         if (payment.Status != PaymentStatus.Authorized) return ProblemResults.InvalidState("The payment must be Authorized.");
         var captureAmount = amount ?? payment.AmountMinor;
         if (capture && (captureAmount <= 0 || captureAmount > payment.AmountMinor))

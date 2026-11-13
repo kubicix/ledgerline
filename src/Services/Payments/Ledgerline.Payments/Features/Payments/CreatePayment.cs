@@ -14,19 +14,26 @@ internal static class CreatePayment
 {
     internal static Task<IResult> HandleAsync(PaymentKind kind, Guid? source, Guid destination, long amount, string currency,
         string? cardToken, HttpContext http, PaymentsDbContext db, SagaRunner runner, ICurrentUser user, IClock clock, CancellationToken ct,
-        CaptureMode? captureMode = null)
+        CaptureMode? captureMode = null, bool requireCardToken = false)
     {
         var key = (string)http.Items[IdempotencyEndpointFilter.KeyItem]!;
         var hash = (string)http.Items[IdempotencyEndpointFilter.HashItem]!;
         return IdempotentCreate.ExecuteAsync(hash,
-            () => CreateAsync(kind, source, destination, amount, currency, cardToken, db, runner, user, clock, key, hash, captureMode, ct),
+            () => CreateAsync(kind, source, destination, amount, currency, cardToken, db, runner, user, clock, key, hash, captureMode, requireCardToken, ct),
             () => FindAsync(db, user.Id, key, ct),
             error => error is DbUpdateException { InnerException: PostgresException { SqlState: "23505" } });
     }
 
     private static async Task<IResult> CreateAsync(PaymentKind kind, Guid? source, Guid destination, long amount, string currency,
-        string? cardToken, PaymentsDbContext db, SagaRunner runner, ICurrentUser user, IClock clock, string key, string hash, CaptureMode? captureMode, CancellationToken ct)
+        string? cardToken, PaymentsDbContext db, SagaRunner runner, ICurrentUser user, IClock clock, string key, string hash,
+        CaptureMode? captureMode, bool requireCardToken, CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await SagaActionAudit.LockKeyAsync(db, user.Id, key, ct);
+        if (await SagaActionAudit.FindAsync(db, user.Id, key, ct) is not null ||
+            await db.Refunds.AnyAsync(x => x.RequestedBy == user.Id && x.IdempotencyKey == key, ct)) return ProblemResults.IdempotencyKeyReused();
+        if (requireCardToken && string.IsNullOrWhiteSpace(cardToken))
+            return ProblemResults.Validation(new Dictionary<string, string[]> { ["cardToken"] = ["A card token is required."] });
         if (amount <= 0 || amount > Money.MaxAmountMinor) return ProblemResults.Validation(new Dictionary<string, string[]> { ["amountMinor"] = ["Amount is outside the supported range."] });
         var invalid = await ValidateAccountsAsync(kind, source, destination, currency, db, user.Id, ct);
         if (invalid is not null) return invalid;
@@ -34,6 +41,8 @@ internal static class CreatePayment
             SourceAccountId = source, DestinationAccountId = destination, AmountMinor = amount, Currency = currency,
             CardToken = cardToken, CaptureMode = captureMode, IdempotencyKey = key, RequestHash = hash, CreatedAt = clock.UtcNow, UpdatedAt = clock.UtcNow };
         await runner.StartAsync(payment, ct);
+        await transaction.CommitAsync(ct);
+        runner.OnCommitted();
         return Results.Accepted("/payments/" + payment.Id, await PaymentResponse.FromAsync(payment, db, ct));
     }
 
