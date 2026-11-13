@@ -591,7 +591,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 - [x] One command still starts everything (M2-T19). **DoD: one command**
 - [x] Architecture diagram in README matches the running system (M2-T19). **DoD: architecture diagram**
 - [x] `payment captures at most once` proven: `Capture_and_void_race_has_exactly_one_winner`, `HoldTests` (M2-T10, M2-T14).
-- [ ] CI green on the last commit.
+- CI merge gate: [PR #2 checks](https://github.com/kubicix/ledgerline/pull/2) must be green before merge.
 
 ---
 

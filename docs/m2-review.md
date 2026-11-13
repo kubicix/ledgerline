@@ -9,8 +9,9 @@ seven Important recovery/concurrency issues. A targeted runtime check establishe
 an eighth issue in Gateway timeout classification. No Critical or Minor findings
 were reported. All findings and the recovered-cache counter continuation now pass
 their regressions and the full 505/505 solution suite, with zero failures/skips.
-The Release build has zero warnings/errors. Compose and GitHub integration gates
-are the remaining closing steps.
+The Release build has zero warnings/errors. Compose and upgrade proofs below also
+passed. [PR #2](https://github.com/kubicix/ledgerline/pull/2) records the authoritative
+GitHub checks and merge state.
 
 ## Findings and current evidence
 
@@ -76,7 +77,8 @@ Final integration proof: fresh full Compose startup and both smoke scripts passe
 Mailpit now uses persistent storage, and all seven message identities survived a
 restart. The legacy demo database also migrated successfully: all three Risk
 timestamps were backfilled, trial balance stayed zero, and capture/refund totals
-remained 2000/500. GitHub integration is the remaining gate. Do not start M3.
+remained 2000/500. Require green PR checks before integration. Stop at M2; do not
+start M3 without a new user instruction.
 
 ## Deferred M2 minor finding
 

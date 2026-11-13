@@ -16,7 +16,7 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 |---|---|---|
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
-| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implementation complete; final verification and review in progress |
+| M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
 | M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
