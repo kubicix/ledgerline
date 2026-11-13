@@ -423,7 +423,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T04: Risk service: schema, evaluate handler, daily totals
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` sections 3, 4 (steps 1, 2, 4, 5, 6), 6, 7. **Depends:** M2-T03, M1-T10.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Risk/{EvaluateRisk.cs,RiskApproved.cs,RiskRejected.cs}` plus samples; in Risk `Infrastructure/{RiskDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs,RuleCache.cs}`, `Features/Evaluate/EvaluateRiskHandler.cs`, `Features/Evaluate/IVelocityCounter.cs`, `Features/Evaluate/DatabaseVelocityCounter.cs`; modify `Program.cs`. Create `tests/Ledgerline.Risk.IntegrationTests/` project (add to solution; `tests/Directory.Build.props` applies) with `EvaluateRiskTests.cs`.**Produces:** `IVelocityCounter.CountAsync(Guid customerId, Guid paymentId, DateTimeOffset at, int windowSeconds, CancellationToken ct) : Task<int>`; seeded rules with the spec defaults for `TRY`, `EUR`, `USD`.
