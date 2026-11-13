@@ -443,7 +443,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T06: Bank Simulator: operations with idempotency
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `bank-simulator.md` sections 1, 2, 3 (authorizations, capture, void, refund, operations lookup), 4. **Depends:** M1-T12.
 **Files:** Create in BankSimulator `Infrastructure/{BankDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}`, `Features/{AuthorizeEndpoint.cs,CaptureEndpoint.cs,VoidEndpoint.cs,RefundEndpoint.cs,LookupEndpoint.cs,ApiKeyFilter.cs,BankIdempotency.cs}`; modify `Program.cs`. Reference `Ledgerline.Testing` from `Ledgerline.BankSimulator.Tests`. Test `tests/Ledgerline.BankSimulator.Tests/BankOperationsTests.cs`.

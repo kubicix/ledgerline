@@ -1,8 +1,24 @@
-// Walking skeleton: no endpoints and no business logic yet. See docs/plan.md.
-var builder = WebApplication.CreateBuilder(args);
+using Ledgerline.BankSimulator.Features;
+using Ledgerline.BankSimulator.Infrastructure;
+using Ledgerline.BuildingBlocks.Web;
+using Microsoft.EntityFrameworkCore;
+
+var migrate = args.FirstOrDefault() == "migrate";
+var builder = WebApplication.CreateBuilder(migrate ? args[1..] : args);
+if (migrate)
+{
+    await MigrateCommand.RunAsync(builder.Configuration.GetConnectionString("Database")
+        ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
+    return;
+}
+builder.AddLedgerlineWebDefaults("banksim");
+builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
+builder.Services.AddDbContext<BankDbContext>((services, options) =>
+    options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 
 var app = builder.Build();
-
+app.UseLedgerlineWebDefaults();
+app.MapBankEndpoints();
 app.Run();
 
 namespace Ledgerline.BankSimulator
