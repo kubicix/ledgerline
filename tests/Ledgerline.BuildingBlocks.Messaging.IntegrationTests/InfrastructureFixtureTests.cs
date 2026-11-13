@@ -7,6 +7,7 @@ using StackExchange.Redis;
 
 namespace Ledgerline.BuildingBlocks.Messaging.IntegrationTests;
 
+[Collection("Broker lifecycle")]
 public sealed class InfrastructureFixtureTests(InfrastructureFixture infrastructure)
 {
     [Fact]
@@ -65,4 +66,8 @@ public sealed class InfrastructureFixtureTests(InfrastructureFixture infrastruct
     }
 }
 
+
+
+[CollectionDefinition("Broker lifecycle", DisableParallelization = true)]
+public sealed class BrokerLifecycleDefinition { }
 

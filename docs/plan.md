@@ -144,7 +144,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T05: RabbitMQ connection and topology
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 4. **Depends:** M1-T02, M1-T03.
 **Files:** Create in Messaging project: `RabbitMq/RabbitMqOptions.cs`, `RabbitMq/RabbitMqConnection.cs` (singleton holding one `IConnection`, automatic recovery on), `RabbitMq/Topology.cs`. Test `TopologyTests.cs`.
