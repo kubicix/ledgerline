@@ -1,5 +1,6 @@
 using Ledgerline.Accounts.Infrastructure;
 using Ledgerline.Accounts.Features.LedgerCommands;
+using Ledgerline.Accounts.Features.Accounts;
 using Ledgerline.Accounts.Ledger;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
@@ -27,6 +28,7 @@ builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
+app.MapAccountsEndpoints();
 
 app.Run();
 

@@ -280,7 +280,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T17: Accounts HTTP API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 3 (all except freeze, unfreeze, trial balance); `building-blocks.md` section 9. **Depends:** M1-T16.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Accounts/AccountOpened.cs`; in Accounts `Features/Accounts/{OpenAccountEndpoint.cs,GetAccountEndpoint.cs,ListAccountsEndpoint.cs,ListEntriesEndpoint.cs,AccountResponse.cs}`; modify `Program.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/AccountsApiTests.cs`.
