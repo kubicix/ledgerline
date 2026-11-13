@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Text.Json;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,12 +18,14 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
     private static readonly ActivitySource Activities = new("Ledgerline.Messaging");
     private static readonly Meter Metrics = new("Ledgerline");
     private static readonly Counter<long> Duplicates = Metrics.CreateCounter<long>("ledgerline.inbox.duplicates");
+    private static readonly Counter<long> Retries = Metrics.CreateCounter<long>("ledgerline.consumer.retries");
+    private static readonly Counter<long> DeadLetters = Metrics.CreateCounter<long>("ledgerline.consumer.dead_lettered");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var forceStop = new CancellationTokenSource();
         await using var channel = await connection.CreateChannelAsync(false, stoppingToken);
-        await Topology.DeclareAsync(channel, options.Service, handlers.TypeNames, stoppingToken);
+        await Topology.DeclareAsync(channel, options.Service, handlers.TypeNames, options.RetryTtlMs, stoppingToken);
         await channel.BasicQosAsync(0, options.Prefetch, false, stoppingToken);
         var consumer = new AsyncEventingBasicConsumer(channel);
         var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -45,13 +48,59 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
 
     private async Task HandleDeliveryAsync(IChannel channel, BasicDeliverEventArgs delivery, CancellationToken ct)
     {
+        var envelope = ReadEnvelope(delivery.Body);
+        if (envelope is null || !handlers.Contains(envelope.Type))
+        {
+            await ForwardSafelyAsync(channel, delivery, Topology.DeadQueue(options.Service), 1,
+                envelope is null ? "invalid-envelope" : "unknown-type", ct);
+            return;
+        }
+        var attempt = delivery.BasicProperties.Headers?.TryGetValue("x-ledgerline-attempt", out var value) == true
+            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 1;
         try
         {
-            var envelope = EnvelopeSerializer.Deserialize(delivery.Body.Span);
-            var attempt = delivery.BasicProperties.Headers?.TryGetValue("x-ledgerline-attempt", out var value) == true
-                ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 1;
             await ProcessAsync(envelope, attempt, ct);
             await acknowledgments.AckAsync(channel, delivery.DeliveryTag, ct);
+        }
+        catch (Exception error)
+        {
+            HandlerFailed(logger, error);
+            var retry = attempt < options.MaxAttempts;
+            await ForwardSafelyAsync(channel, delivery,
+                retry ? Topology.RetryQueue(options.Service) : Topology.DeadQueue(options.Service),
+                retry ? attempt + 1 : attempt, retry ? null : "max-attempts", ct);
+        }
+    }
+
+    private static MessageEnvelope? ReadEnvelope(ReadOnlyMemory<byte> body)
+    {
+        try
+        {
+            var envelope = EnvelopeSerializer.Deserialize(body.Span);
+            return string.IsNullOrEmpty(envelope.Type) || envelope.Payload.ValueKind == JsonValueKind.Undefined ? null : envelope;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private async Task ForwardSafelyAsync(IChannel channel, BasicDeliverEventArgs delivery, string queue,
+        int attempt, string? deadReason, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await using var publishing = await connection.CreateChannelAsync(true, timeout.Token);
+            var properties = new BasicProperties(delivery.BasicProperties)
+            {
+                Headers = delivery.BasicProperties.Headers is { } headers
+                    ? new Dictionary<string, object?>(headers) : new Dictionary<string, object?>()
+            };
+            properties.Headers["x-ledgerline-attempt"] = attempt;
+            if (deadReason is not null) properties.Headers["x-ledgerline-dead-reason"] = deadReason;
+            await publishing.BasicPublishAsync("", queue, true, properties, delivery.Body, timeout.Token);
+            await acknowledgments.AckAsync(channel, delivery.DeliveryTag, ct);
+            if (deadReason is null) Retries.Add(1);
+            else DeadLetters.Add(1);
         }
         catch (Exception error)
         {
@@ -92,4 +141,6 @@ public sealed class ConsumerOptions
 {
     public string Service { get; set; } = "";
     public ushort Prefetch { get; set; } = 16;
+    public int MaxAttempts { get; set; } = 5;
+    public int RetryTtlMs { get; set; } = 5000;
 }

@@ -190,7 +190,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T09: Retry queue and dead-lettering
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 8 steps 1 and 6. **Depends:** M1-T08.
 **Files:** Modify `Consuming/ConsumerHost.cs`. Test `RetryAndDeadLetterTests.cs`.
