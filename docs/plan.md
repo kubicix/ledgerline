@@ -178,7 +178,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T08: Consumer pipeline with inbox deduplication
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 8 steps 1 to 5. **Depends:** M1-T05, M1-T04.
 **Files:** Create `Consuming/ConsumerHost.cs` (`BackgroundService`), `Consuming/HandlerRegistry.cs`, `Consuming/IAckStrategy.cs`, `Consuming/DefaultAckStrategy.cs`. Test `ConsumerTests.cs` with a test handler `RenameWidgetHandler` that updates a `Widget` row and enqueues `WidgetRenamed`.
