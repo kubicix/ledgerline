@@ -335,7 +335,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T22: Saga step timeouts
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.6 (ledger steps only in M1). **Depends:** M1-T21.
 **Files:** Create in Payments `Sagas/SagaTimeoutPoller.cs` (`BackgroundService`), `Sagas/TimeoutOptions.cs`. Test `tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs` (options shortened: step timeout 300 ms, poll 50 ms).

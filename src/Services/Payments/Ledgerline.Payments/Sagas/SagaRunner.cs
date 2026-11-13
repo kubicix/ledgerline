@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.Payments.Sagas;
 
-public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock clock, ICrashPoint crashPoint) : IPostCommitHook
+public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock clock, ICrashPoint crashPoint, TimeoutOptions timeoutOptions) : IPostCommitHook
 {
     private static readonly Meter Meter = new("Ledgerline.Payments");
     private static readonly Counter<long> ManualReviews = Meter.CreateCounter<long>("ledgerline.saga.manual_review");
@@ -74,7 +74,9 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
                 db.SagaTimeouts.RemoveRange(await db.SagaTimeouts.Where(x => x.PaymentId == payment.Id).ToListAsync(ct));
                 break;
             case SagaEffect.ScheduleTimeout timeout:
-                db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step, DueAt = clock.UtcNow + timeout.After });
+                var after = timeout.Step is SagaStep.LedgerCredit or SagaStep.LedgerTransfer
+                    ? TimeSpan.FromMilliseconds(timeoutOptions.StepTimeoutMs) : timeout.After;
+                db.SagaTimeouts.Add(new SagaTimeout { Id = Ids.New(), PaymentId = payment.Id, Step = timeout.Step, DueAt = clock.UtcNow + after });
                 break;
             case SagaEffect.SendCommand { Message: CreditTopUp command }:
                 outbox.Enqueue(command, payment.Id, context?.MessageId);

@@ -24,6 +24,8 @@ builder.AddLedgerlineWebDefaults("payments");
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<SagaRunner>();
+builder.Services.AddSingleton(services => services.GetRequiredService<IConfiguration>().GetSection("Saga:Timeouts").Get<TimeoutOptions>() ?? new());
+builder.Services.AddHostedService<SagaTimeoutPoller>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<SagaRunner>());
 builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration, messaging => messaging.Service("payments")
     .Consume<AccountOpened, AccountOpenedHandler>()
