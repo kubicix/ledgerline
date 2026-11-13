@@ -575,7 +575,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T19: Compose for the whole system, architecture rules, README
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0005; `design.md` section 5. **Depends:** M2-T16, M2-T17, M2-T18.
 **Files:** Create Dockerfiles for Risk, Notifications, BankSimulator, Gateway; modify `compose.yaml` (profile `app`: all services with migrate jobs, gateway on host port 8080, service host ports removed except the gateway; `deploy/compose/postgres/init-databases.sql` unchanged); modify `scripts/smoke.*` (through the gateway with Keycloak tokens: open wallets for `alice`, `bob`, `shop`; top-up with `tok_ok`; transfer; merchant payment with manual capture; partial refund; assert balances and that Mailpit received at least 4 emails; assert trial balance zero as `admin`). Modify `tests/Ledgerline.ArchitectureTests/ServiceIsolationTests.cs`: add `Consumers_are_registered_only_through_MessagingBuilder` (no type outside `Ledgerline.BuildingBlocks.Messaging` references `RabbitMQ.Client`), `Only_ledger_namespace_writes_account_balances` (the `BalanceMinor` setter of the account entity is `private`; the only mutating method is `ApplyPosting(Direction, long)`; the test asserts by reflection that the setter is private and that no public or internal method other than `ApplyPosting` exists on the entity that takes an amount), `Amounts_are_never_floating_point` (no property or parameter named `*Amount*` or `*Minor*` of type `decimal`, `double`, `float` in any Ledgerline assembly). Modify `README.md` (M2 status, full architecture diagram, flows link).
@@ -584,13 +584,13 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ## Milestone 2 checklist
 
-- [ ] Saga with compensation works and is tested: `TopUpFlowTests`, `BankCallTests` (M2-T12, M2-T13).
-- [ ] Risk and Notifications run as separate services (M2-T04, M2-T05, M2-T16).
-- [ ] Gateway is the only public entry (M2-T18, M2-T19).
-- [ ] Real authentication through Keycloak; no dev header path remains (M2-T01).
-- [ ] One command still starts everything (M2-T19). **DoD: one command**
-- [ ] Architecture diagram in README matches the running system (M2-T19). **DoD: architecture diagram**
-- [ ] `payment captures at most once` proven: `Capture_and_void_race_has_exactly_one_winner`, `HoldTests` (M2-T10, M2-T14).
+- [x] Saga with compensation works and is tested: `TopUpFlowTests`, `BankCallTests` (M2-T12, M2-T13).
+- [x] Risk and Notifications run as separate services (M2-T04, M2-T05, M2-T16).
+- [x] Gateway is the only public entry (M2-T18, M2-T19).
+- [x] Real authentication through Keycloak; no dev header path remains (M2-T01).
+- [x] One command still starts everything (M2-T19). **DoD: one command**
+- [x] Architecture diagram in README matches the running system (M2-T19). **DoD: architecture diagram**
+- [x] `payment captures at most once` proven: `Capture_and_void_race_has_exactly_one_winner`, `HoldTests` (M2-T10, M2-T14).
 - [ ] CI green on the last commit.
 
 ---

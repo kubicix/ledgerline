@@ -55,7 +55,7 @@ public static class RebuildProjectionsCommand
     {
         var posted = (LedgerEntryPosted)EnvelopeSerializer.FromPayload(item.Data, typeof(LedgerEntryPosted));
         ApplyHold(account.Id, posted, holds);
-        account.BalanceMinor = checked(account.BalanceMinor + (posted.Direction == Direction.Credit ? posted.AmountMinor : -posted.AmountMinor));
+        account.ApplyPosting(posted.Direction, posted.AmountMinor);
         if (account.BalanceMinor != posted.BalanceAfterMinor) throw new InvalidDataException("Event balance does not match replay.");
         entries.TryAdd(posted.JournalEntryId, new JournalEntry
         {

@@ -15,6 +15,7 @@ if (migrate)
     return;
 }
 builder.AddLedgerlineWebDefaults("risk");
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<RiskDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddSingleton<RuleCache>();

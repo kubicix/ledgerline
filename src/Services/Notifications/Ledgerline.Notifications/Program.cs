@@ -18,6 +18,7 @@ if (migrate)
     return;
 }
 builder.AddLedgerlineWebDefaults("notifications");
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<NotificationsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<NotificationPlanner>();

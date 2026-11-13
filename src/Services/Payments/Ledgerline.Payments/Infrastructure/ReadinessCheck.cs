@@ -11,8 +11,7 @@ public sealed class ReadinessCheck(PaymentsDbContext db, RabbitMqConnection brok
         try
         {
             if (!await db.Database.CanConnectAsync(cancellationToken)) return HealthCheckResult.Unhealthy("Database unavailable.");
-            await using var channel = await broker.CreateChannelAsync(false, cancellationToken);
-            return channel.IsOpen ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Broker unavailable.");
+            return await broker.IsReadyAsync(cancellationToken) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Broker unavailable.");
         }
         catch (Exception error) { return HealthCheckResult.Unhealthy("Dependency unavailable.", error); }
     }

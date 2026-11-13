@@ -5,10 +5,9 @@ Updated: 2026-11-13. Repository: https://github.com/kubicix/ledgerline.
 ## Current checkpoint
 
 - M1: complete, reviewed and merged through PR #1.
-- M2: 16 of 19 tasks committed. Task 17, publication-aware timeouts, is in progress.
+- M2: all 19 implementation tasks verified. Final independent review and PR integration are pending.
 - M3 and subsequent milestones: not started.
-- Overall completed tasks: 41 of 82, 50%. Completion of M2 will
-  bring this to 44 of 82, approximately 54%. These percentages count tasks equally;
+- Overall completed tasks: 44 of 82, approximately 54%. These percentages count tasks equally;
   they do not estimate effort or production readiness.
 
 The user authorized completing M2, final review, the PR and its merge, then
@@ -17,15 +16,15 @@ pausing. Do not start M3 without a new instruction.
 ## Milestone checklist
 
 - [x] M1: foundations, messaging, ledger and initial payment flows.
-- [ ] M2: full payment behavior and service integration.
+- [x] M2: full payment behavior and service integration implemented and locally verified.
   - [x] T01-T05: JWT, Redis idempotency and Risk.
   - [x] T06-T07: BankSimulator operations, failures and settlements.
   - [x] T08-T11: pure sagas, holds, refunds, account status and trial balance.
   - [x] T12-T15: bank client, full top-up, merchant payments and refund runtime.
   - [x] T16: Notifications and SMTP delivery.
-  - [ ] T17: publication-aware saga timeouts.
-  - [ ] T18: Gateway.
-  - [ ] T19: Compose, architecture and end-to-end verification.
+  - [x] T17: publication-aware saga timeouts.
+  - [x] T18: Gateway.
+  - [x] T19: Compose, architecture and end-to-end verification.
   - [ ] Final fresh review, required fixes, PR checks and merge.
 - [ ] M3 and remaining plan tasks: see [the implementation plan](plan.md).
 
@@ -43,7 +42,8 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
    `codex/milestone-2` in the existing managed worktree; its directory still has
    the historical `milestone-1` name.
 3. The M2 base is `e5843e970f76e3bf1b88ddfbe985b74e1f8dfa55`. The last completed
-   task at this checkpoint is T16, commit `0a7b5f7`.
+   tasks at this checkpoint cover all M2 implementation work. The review checkpoint
+   and integration PR are recorded below when available.
 4. During active execution, `.superpowers/sdd/plan/progress.md` contains task
    evidence and rulings. Trust committed completion records over remembered
    context. Do not redo completed tasks.
@@ -53,12 +53,23 @@ with Mailpit locally. Exact verified versions are in ADR 0000.
 6. Do not touch the user-owned untracked `orchestrator-prompt.md` in the original
    checkout. Never include secrets or local credentials in this document.
 
-## Most recent verified gates
+## Verified gates
+
+Final implementation gate: all 491 solution tests passed, with zero failures or
+skips. The solution build passed with zero warnings and errors. Tests ran serially
+by module with the command below. Final review fixes, if required, need a new suite gate.
 
 After T15-T16: Payments integration 60/60, Payments pure tests 159/159, contract
 samples 22/22, Notifications integration 10/10, Notifications templates 9/9,
 and solution build with zero warnings and errors. These are
 subsystem results, not the final M2 whole-solution verification.
+
+T17 TimeoutTests passed 7/7, including one and three top-ups accepted during a
+broker outage. T18 Gateway tests passed 18/18. T19 architecture guards passed
+5/5. A fresh `ledgerline-m2-proof` Compose project passed both PowerShell and
+Bash smoke scripts through Gateway and real Keycloak: Alice 6000, Bob 2500,
+merchant 1500, all currency trial balances zero and at least four Mailpit emails.
+The task's containers were stopped without deleting their volumes afterward.
 
 Useful verification commands:
 
@@ -69,3 +80,8 @@ dotnet test --solution Ledgerline.slnx --max-parallel-test-modules 1
 
 The final M2 checkpoint will update this document with the reviewed commit,
 PR/merge links, final evidence, accepted decisions and deferred findings.
+Execution decisions and their tradeoffs are preserved in [M2 decisions](m2-decisions.md).
+
+After a new user instruction to start M3, the next task is M3-T01, distributed
+tracing across HTTP, the outbox and RabbitMQ. Read ADR 0009 and the task brief
+before adding packages; instrumentation versions must be verified individually.

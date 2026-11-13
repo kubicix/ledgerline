@@ -12,6 +12,7 @@ if (migrate)
     return;
 }
 builder.AddLedgerlineWebDefaults("banksim");
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("database", timeout: TimeSpan.FromSeconds(3));
 builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
 builder.Services.AddSingleton<FaultState>();
 builder.Services.AddSingleton<SettlementTampering>();

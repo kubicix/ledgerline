@@ -1,4 +1,4 @@
-# Ledgerline local infrastructure and M1 application services.
+# Ledgerline local infrastructure and M2 application services.
 # Image tags verified on 2026-11-13 (see docs/adr/0000-verified-versions.md).
 # All credentials below are local development defaults, never reuse them.
 name: ledgerline
@@ -54,7 +54,6 @@ services:
     build:
       context: .
       dockerfile: src/Services/Accounts/Ledgerline.Accounts/Dockerfile
-    ports: ["5101:8080"]
     environment:
       ConnectionStrings__Database: Host=postgres;Database=accounts_db;Username=accounts;Password=accounts_dev
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
@@ -88,9 +87,10 @@ services:
     build:
       context: .
       dockerfile: src/Services/Payments/Ledgerline.Payments/Dockerfile
-    ports: ["5102:8080"]
     environment:
       ConnectionStrings__Database: Host=postgres;Database=payments_db;Username=payments;Password=payments_dev
+      Bank__BaseUrl: http://banksim:8080
+      Bank__ApiKey: ${BANK_API_KEY:-ledgerline-bank-local-dev}
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
       Auth__Mode: Oidc
       ConnectionStrings__Redis: redis:6379
@@ -109,6 +109,123 @@ services:
         condition: service_completed_successfully
       keycloak:
         condition: service_healthy
+    healthcheck: *app-health
+
+  risk-migrate:
+    profiles: [app]
+    image: ledgerline-risk:local
+    build:
+      context: .
+      dockerfile: src/Services/Risk/Ledgerline.Risk/Dockerfile
+    command: [migrate]
+    restart: "no"
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=risk_db;Username=risk;Password=risk_dev
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  notifications-migrate:
+    profiles: [app]
+    image: ledgerline-notifications:local
+    build:
+      context: .
+      dockerfile: src/Services/Notifications/Ledgerline.Notifications/Dockerfile
+    command: [migrate]
+    restart: "no"
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=notifications_db;Username=notifications;Password=notifications_dev
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  banksim-migrate:
+    profiles: [app]
+    image: ledgerline-banksim:local
+    build:
+      context: .
+      dockerfile: src/Services/BankSimulator/Ledgerline.BankSimulator/Dockerfile
+    command: [migrate]
+    restart: "no"
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=banksim_db;Username=banksim;Password=banksim_dev
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  risk:
+    profiles: [app]
+    image: ledgerline-risk:local
+    build:
+      context: .
+      dockerfile: src/Services/Risk/Ledgerline.Risk/Dockerfile
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=risk_db;Username=risk;Password=risk_dev
+      ConnectionStrings__Redis: redis:6379
+      Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+    depends_on:
+      risk-migrate: { condition: service_completed_successfully }
+      rabbitmq-init: { condition: service_completed_successfully }
+      keycloak: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck: *app-health
+
+  notifications:
+    profiles: [app]
+    image: ledgerline-notifications:local
+    build:
+      context: .
+      dockerfile: src/Services/Notifications/Ledgerline.Notifications/Dockerfile
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=notifications_db;Username=notifications;Password=notifications_dev
+      ConnectionStrings__Redis: redis:6379
+      Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      Smtp__Host: mailpit
+      Smtp__Port: "1025"
+    depends_on:
+      notifications-migrate: { condition: service_completed_successfully }
+      rabbitmq-init: { condition: service_completed_successfully }
+      keycloak: { condition: service_healthy }
+      mailpit: { condition: service_started }
+    healthcheck: *app-health
+
+  banksim:
+    profiles: [app]
+    image: ledgerline-banksim:local
+    build:
+      context: .
+      dockerfile: src/Services/BankSimulator/Ledgerline.BankSimulator/Dockerfile
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=banksim_db;Username=banksim;Password=banksim_dev
+      Bank__ApiKey: ${BANK_API_KEY:-ledgerline-bank-local-dev}
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+    depends_on:
+      banksim-migrate: { condition: service_completed_successfully }
+    healthcheck: *app-health
+
+  gateway:
+    profiles: [app]
+    image: ledgerline-gateway:local
+    build:
+      context: .
+      dockerfile: src/Gateway/Ledgerline.Gateway/Dockerfile
+    ports: ["8080:8080"]
+    environment:
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+    depends_on:
+      accounts: { condition: service_healthy }
+      payments: { condition: service_healthy }
+      risk: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+      banksim: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *app-health
 
   postgres:

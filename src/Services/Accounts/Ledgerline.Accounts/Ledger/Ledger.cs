@@ -51,7 +51,7 @@ public sealed class Ledger(AccountsDbContext db, EventStore events, IClock clock
         foreach (var line in request.Lines)
         {
             var account = accounts[line.AccountId];
-            account.BalanceMinor = checked(account.BalanceMinor + (line.Direction == Direction.Credit ? line.AmountMinor : -line.AmountMinor));
+            account.ApplyPosting(line.Direction, line.AmountMinor);
             account.Version = checked(account.Version + 1);
             var payload = new LedgerEntryPosted(entry.Id, request.EntryType, request.PaymentId, line.Direction,
                 line.AmountMinor, request.Currency, account.BalanceMinor);
