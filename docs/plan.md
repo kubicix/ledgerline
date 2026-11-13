@@ -412,7 +412,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T03: Risk rules (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `risk.md` section 2. **Depends:** M1-T01.
 **Files:** Create in Risk `Domain/{RiskRule.cs,RuleCode.cs,RiskRequest.cs,RiskCounters.cs,RiskEvaluator.cs,RiskOutcome.cs}`. Test `tests/Ledgerline.Risk.Tests/RiskEvaluatorTests.cs`.
