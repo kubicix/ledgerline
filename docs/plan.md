@@ -313,7 +313,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T20: Payments saga core for M1 (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 2, 4.2, 7. M1 simplification: no `RiskCheck`, and `TopUp` has no bank steps. **Depends:** M1-T16.
 **Files:** Create in Payments: `Sagas/{PaymentStatus.cs,SagaStep.cs,PaymentKind.cs,PaymentSnapshot.cs,SagaInput.cs,SagaEffect.cs,SagaDecision.cs,PaymentSaga.cs,OperationIds.cs}`. Test `tests/Ledgerline.Payments.Tests/{PaymentSagaTests.cs,OperationIdsTests.cs}`.
