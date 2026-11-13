@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>false</IsTestProject>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Remove="xunit.v3" />
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="Testcontainers.Redis" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="RabbitMQ.Client" />
+    <PackageReference Include="StackExchange.Redis" />
+    <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+</Project>
+
+
+
+

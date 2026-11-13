@@ -1,0 +1,19 @@
+using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
+namespace Ledgerline.Accounts.Infrastructure;
+
+public sealed class ReadinessCheck(AccountsDbContext db, RabbitMqConnection broker) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!await db.Database.CanConnectAsync(cancellationToken)) return HealthCheckResult.Unhealthy("Database unavailable.");
+            await using var channel = await broker.CreateChannelAsync(false, cancellationToken);
+            return channel.IsOpen ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Broker unavailable.");
+        }
+        catch (Exception error) { return HealthCheckResult.Unhealthy("Dependency unavailable.", error); }
+    }
+}

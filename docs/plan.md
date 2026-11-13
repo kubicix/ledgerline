@@ -96,7 +96,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T01: Money, Ids, clock
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 1. **Depends:** none.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks/{Money.cs,CurrencyMismatchException.cs,Ids.cs,IClock.cs,SystemClock.cs}`. Test `tests/Ledgerline.BuildingBlocks.Tests/MoneyTests.cs`.
@@ -108,7 +108,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T02: Message envelope, type names, serializer
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 2, 3, 5. **Depends:** M1-T01.
 **Files:** Create in `src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/`: `MessageEnvelope.cs`, `MessageTypeAttribute.cs`, `MessageTypeRegistry.cs`, `EnvelopeSerializer.cs`, `MessageContext.cs`, `IMessageHandler.cs`. Test `tests/Ledgerline.BuildingBlocks.Tests/EnvelopeTests.cs`; add a project reference from that test project to the Messaging project.
@@ -120,7 +120,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T03: Shared test infrastructure
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 2. **Depends:** none.
 **Files:** Create `tests/Ledgerline.Testing/Ledgerline.Testing.csproj` (a library: set `IsTestProject=false`, `OutputType=Library` in the csproj), `InfrastructureFixture.cs`, `Eventually.cs`. Add to `Directory.Packages.props`: `Testcontainers.PostgreSql`, `Testcontainers.RabbitMq`, `Testcontainers.Redis` 4.16.0, `Npgsql` (version that `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 depends on), `RabbitMQ.Client` 7.2.2, `StackExchange.Redis` 3.4.35. Add the project to `Ledgerline.slnx`. Reference it from `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/InfrastructureFixtureTests.cs`.
@@ -132,7 +132,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T04: Outbox and inbox tables, IOutbox
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 5, 6; ADR 0003. **Depends:** M1-T02, M1-T03.
 **Files:** Create in Messaging project: `Outbox/OutboxMessage.cs`, `Outbox/IOutbox.cs`, `Outbox/EfOutbox.cs`, `Inbox/InboxMessage.cs`, `ModelBuilderExtensions.cs`. Add packages `Microsoft.EntityFrameworkCore` 10.0.15, `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3. Create `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Support/TestDbContext.cs` (one entity `Widget(Guid Id, string Name)`, calls `AddOutboxAndInbox()`, schema created with `EnsureCreated`). Test `OutboxTests.cs`.
@@ -144,7 +144,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T05: RabbitMQ connection and topology
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 4. **Depends:** M1-T02, M1-T03.
 **Files:** Create in Messaging project: `RabbitMq/RabbitMqOptions.cs`, `RabbitMq/RabbitMqConnection.cs` (singleton holding one `IConnection`, automatic recovery on), `RabbitMq/Topology.cs`. Test `TopologyTests.cs`.
@@ -155,7 +155,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T06: Confirmed publisher and BrokerProbe
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 2, 7. **Depends:** M1-T05.
 **Files:** Create `RabbitMq/IOutboxPublisher.cs`, `RabbitMq/RabbitMqOutboxPublisher.cs` in Messaging; `tests/Ledgerline.Testing/BrokerProbe.cs`. Test `PublisherTests.cs`.
@@ -166,7 +166,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T07: Outbox relay
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 7; ADR 0003. **Depends:** M1-T04, M1-T06.
 **Files:** Create `Outbox/OutboxRelay.cs` (`BackgroundService`, generic on `TDbContext`), `Outbox/OutboxSignal.cs`, `Outbox/RelayOptions.cs`. Test `OutboxRelayTests.cs`.
@@ -178,7 +178,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T08: Consumer pipeline with inbox deduplication
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 8 steps 1 to 5. **Depends:** M1-T05, M1-T04.
 **Files:** Create `Consuming/ConsumerHost.cs` (`BackgroundService`), `Consuming/HandlerRegistry.cs`, `Consuming/IAckStrategy.cs`, `Consuming/DefaultAckStrategy.cs`. Test `ConsumerTests.cs` with a test handler `RenameWidgetHandler` that updates a `Widget` row and enqueues `WidgetRenamed`.
@@ -190,7 +190,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T09: Retry queue and dead-lettering
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 8 steps 1 and 6. **Depends:** M1-T08.
 **Files:** Modify `Consuming/ConsumerHost.cs`. Test `RetryAndDeadLetterTests.cs`.
@@ -201,7 +201,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T10: Registration API and two-host round trip
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 5. **Depends:** M1-T07, M1-T09.
 **Files:** Create `MessagingBuilder.cs`, `MessagingServiceCollectionExtensions.cs`. Test `RoundTripTests.cs` (two generic hosts, "ping" and "pong", each with its own database and `TestDbContext`).
@@ -212,7 +212,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T11: Messaging failure proofs (broker down, crash, duplicate)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F1, F2, F3 (Messaging rows). **Depends:** M1-T10.
 **Files:** Create `tests/Ledgerline.Testing/Faults/{StoppingCrashPoint.cs,DroppingAckStrategy.cs}`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs`.
@@ -224,7 +224,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T12: Web defaults (problem details, dev auth, health)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9. **Depends:** none.
 **Files:** Create in `src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/`: `WebDefaults.cs`, `Problems/ProblemCodes.cs`, `Problems/ProblemResults.cs`, `Auth/DevHeaderAuthenticationHandler.cs`, `Auth/CurrentUser.cs`, `Auth/Policies.cs`, `Health/HealthEndpoints.cs`, `Pagination/Page.cs`. Add `Microsoft.AspNetCore.Mvc.Testing` 10.0.15. Reference Web and Mvc.Testing from `tests/Ledgerline.BuildingBlocks.Tests`; test `WebDefaultsTests.cs` using a minimal in-test `WebApplication`.
@@ -235,7 +235,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T13: Accounts database, migration, system accounts, migrate command
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` sections 2, 5, 10. **Depends:** M1-T04, M1-T12.
 **Files:** Create in Accounts project: `Infrastructure/AccountsDbContext.cs`, `Infrastructure/Entities/*.cs` (one per table), `Infrastructure/Migrations/` (EF migration `Initial`), `Infrastructure/SystemAccounts.cs`, `Infrastructure/MigrateCommand.cs`; modify `Program.cs` (web defaults, DbContext, `args[0] == "migrate"` branch). Create `tests/Ledgerline.Testing/ServiceHost.cs`, `DatabaseFactory.cs`. Reference `Ledgerline.Testing` from `Ledgerline.Accounts.IntegrationTests`. Test `MigrationTests.cs`.
@@ -246,7 +246,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T14: Ledger entry builders and validation (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `design.md` section 8; `accounts.md` section 6 step 2. **Depends:** M1-T01.
 **Files:** Create in Accounts project: `Ledger/Direction.cs`, `Ledger/EntryType.cs`, `Ledger/PostingLine.cs`, `Ledger/PostingRequest.cs`, `Ledger/PostingResult.cs`, `Ledger/PostingValidator.cs`, `Ledger/Entries.cs`. Test `tests/Ledgerline.Accounts.Tests/{PostingValidatorTests.cs,EntriesTests.cs}`.
@@ -257,7 +257,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T15: Ledger posting core
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 6 steps 3 to 6, section 7; ADR 0007. **Depends:** M1-T13, M1-T14.
 **Files:** Create `Ledger/ILedger.cs`, `Ledger/Ledger.cs`, `Ledger/EventStore.cs`, `Ledger/LedgerEvents.cs`; `tests/Ledgerline.Testing/LedgerAssert.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/LedgerPostingTests.cs` (tests insert wallets directly through a small test helper `TestAccounts.OpenWalletAsync(db, ownerId, currency, type)` that appends the `account-opened.v1` event and projection row).
@@ -269,7 +269,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T16: Accounts contracts and command handlers (top-up, transfer)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` sections 4, 6 step 1, 8. **Depends:** M1-T10, M1-T15.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Accounts/{CreditTopUp.cs,TransferFunds.cs,LedgerOperationSucceeded.cs,LedgerOperationRejected.cs,JournalEntryPosted.cs,LedgerOperationKind.cs,LedgerRejectionReasons.cs}`; make Contracts reference `Ledgerline.BuildingBlocks.Messaging` (only for `MessageTypeAttribute`, as the spec allows). Create in Accounts: `Features/LedgerCommands/{CreditTopUpHandler.cs,TransferFundsHandler.cs,LedgerOperationRunner.cs}`; modify `Program.cs` (`AddLedgerlineMessaging<AccountsDbContext>`, service name `accounts`). Tests: `tests/Ledgerline.BuildingBlocks.Tests/Contracts/ContractSampleTests.cs` with JSON samples in `Contracts/Samples/*.json`; `tests/Ledgerline.Accounts.IntegrationTests/LedgerCommandTests.cs`.
@@ -280,7 +280,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T17: Accounts HTTP API
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `accounts.md` section 3 (all except freeze, unfreeze, trial balance); `building-blocks.md` section 9. **Depends:** M1-T16.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Accounts/AccountOpened.cs`; in Accounts `Features/Accounts/{OpenAccountEndpoint.cs,GetAccountEndpoint.cs,ListAccountsEndpoint.cs,ListEntriesEndpoint.cs,AccountResponse.cs}`; modify `Program.cs`. Test `tests/Ledgerline.Accounts.IntegrationTests/AccountsApiTests.cs`.
@@ -291,7 +291,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T18: HTTP idempotency (database guarantee)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` section 9, steps 1 and 3. **Depends:** M1-T17.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/Idempotency/{IdempotencyKey.cs,RequestHash.cs,IdempotencyEndpointFilter.cs}`; modify `OpenAccountEndpoint.cs` to use them. Test `tests/Ledgerline.BuildingBlocks.Tests/RequestHashTests.cs`, extend `AccountsApiTests.cs`.
@@ -302,7 +302,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T19: Ledger concurrency proofs and projection rebuild
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F4 (first three rows) and F5 last row; `accounts.md` section 10. **Depends:** M1-T16.
 **Files:** Create in Accounts `Infrastructure/RebuildProjectionsCommand.cs`; modify `Program.cs` (`rebuild-projections` argument). Test `tests/Ledgerline.Accounts.IntegrationTests/{ConcurrencyTests.cs,RebuildTests.cs}`.
@@ -313,7 +313,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T20: Payments saga core for M1 (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 2, 4.2, 7. M1 simplification: no `RiskCheck`, and `TopUp` has no bank steps. **Depends:** M1-T16.
 **Files:** Create in Payments: `Sagas/{PaymentStatus.cs,SagaStep.cs,PaymentKind.cs,PaymentSnapshot.cs,SagaInput.cs,SagaEffect.cs,SagaDecision.cs,PaymentSaga.cs,OperationIds.cs}`. Test `tests/Ledgerline.Payments.Tests/{PaymentSagaTests.cs,OperationIdsTests.cs}`.
@@ -324,7 +324,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T21: Payments persistence, account replica, HTTP API, reply handlers
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3 (topups, transfers, GET), 5, 6. **Depends:** M1-T18, M1-T20.
 **Files:** Create `src/Contracts/Ledgerline.Contracts/Payments/{PaymentCompleted.cs,PaymentFailed.cs}`; in Payments: `Infrastructure/PaymentsDbContext.cs`, `Infrastructure/Entities/*.cs`, `Infrastructure/Migrations/Initial`, `Infrastructure/MigrateCommand.cs`, `Sagas/SagaRunner.cs`, `Features/AccountReplica/{AccountOpenedHandler.cs}`, `Features/Topups/CreateTopUpEndpoint.cs`, `Features/Transfers/CreateTransferEndpoint.cs`, `Features/Payments/{GetPaymentEndpoint.cs,PaymentResponse.cs}`, `Features/LedgerReplies/{LedgerOperationSucceededHandler.cs,LedgerOperationRejectedHandler.cs}`; modify `Program.cs`. Reference `Ledgerline.Testing` from `Ledgerline.Payments.IntegrationTests`. Test `tests/Ledgerline.Payments.IntegrationTests/{PaymentsApiTests.cs,TransferFlowTests.cs}`. In these tests `BrokerProbe` plays Accounts.
@@ -335,7 +335,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T22: Saga step timeouts
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` section 4.6 (ledger steps only in M1). **Depends:** M1-T21.
 **Files:** Create in Payments `Sagas/SagaTimeoutPoller.cs` (`BackgroundService`), `Sagas/TimeoutOptions.cs`. Test `tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs` (options shortened: step timeout 300 ms, poll 50 ms).
@@ -346,7 +346,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T23: Crash proofs for Accounts and Payments
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F2 rows 1 and 2. **Depends:** M1-T11, M1-T21.
 **Files:** Test `tests/Ledgerline.Accounts.IntegrationTests/CrashTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/CrashTests.cs`.
@@ -356,7 +356,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T24: Dockerfiles and the one command
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0005; `design.md` section 11 (migrations). **Depends:** M1-T21.
 **Files:** Create `src/Services/Accounts/Ledgerline.Accounts/Dockerfile`, `src/Services/Payments/Ledgerline.Payments/Dockerfile` (multi-stage, `mcr.microsoft.com/dotnet/sdk:10.0` and `aspnet:10.0`, non-root user, build context = repository root), `.dockerignore`; modify `compose.yaml`: under profile `app` add `accounts-migrate`, `payments-migrate` (run `migrate`, `restart: "no"`), `accounts`, `payments` (depend on infrastructure `service_healthy` and their migrate job `service_completed_successfully`; environment variables for connection strings, RabbitMQ URI, `Auth__Mode=DevHeaders`, `ASPNETCORE_ENVIRONMENT=Development`; host ports 5101 and 5102; healthcheck on `/health/ready`). Create `scripts/smoke.sh` and `scripts/smoke.ps1` (open two wallets with dev headers, top up 100.00, transfer 25.00, poll until `Completed`, print balances, exit non-zero on mismatch).
@@ -366,23 +366,23 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M1-T25: README for M1 and milestone check
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M1-T24.
 **Files:** Modify `README.md`: fill "Quick start" with the verified commands, set the status table rows for M1, add the architecture diagram of the two services, list what is not there yet. Modify `.github/workflows/ci.yml`: nothing new needed (integration tests already run in `dotnet test`); confirm the job passes in under 10 minutes locally with `time dotnet test --solution Ledgerline.slnx`.
-**Prove:** `dotnet test --solution Ledgerline.slnx` passes with zero failures; `grep -c $'—' README.md docs/*.md docs/*/*.md` prints only zeros.
+**Prove:** `dotnet test --solution Ledgerline.slnx` passes with zero failures; `grep -c $'\u2014' README.md docs/*.md docs/*/*.md` prints only zeros.
 **Commit:** `docs: update README for milestone 1`
 
 ## Milestone 1 checklist
 
-- [ ] Starts with one command: `docker compose --profile app up --build -d` (M1-T24). **DoD: one command**
-- [ ] Outbox proven by tests: `OutboxTests`, `OutboxRelayTests` (M1-T04, M1-T07). **DoD: outbox proven**
-- [ ] Idempotent consumer proven by tests: `ConsumerTests`, `LedgerCommandTests` (M1-T08, M1-T16). **DoD: idempotent consumer proven**
-- [ ] Broker-down, crash, and duplicate tests pass at integration level (M1-T11, M1-T23). **DoD: three failure tests** (integration level; system level in M3)
-- [ ] Concurrent transfers proven (M1-T19).
-- [ ] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
-- [ ] README has quick start and status (M1-T25).
-- [ ] CI green on the last commit.
+- [x] Starts with one command: `docker compose --profile app up --build -d` (M1-T24). **DoD: one command**
+- [x] Outbox proven by tests: `OutboxTests`, `OutboxRelayTests` (M1-T04, M1-T07). **DoD: outbox proven**
+- [x] Idempotent consumer proven by tests: `ConsumerTests`, `LedgerCommandTests` (M1-T08, M1-T16). **DoD: idempotent consumer proven**
+- [x] Broker-down, crash, and duplicate tests pass at integration level (M1-T11, M1-T23). **DoD: three failure tests** (integration level; system level in M3)
+- [x] Concurrent transfers proven (M1-T19).
+- [x] ADRs 0000 to 0009 exist and match the code. **DoD: ADRs written**
+- [x] README has quick start and status (M1-T25).
+- [x] Local CI-equivalent checks green; hosted CI awaits the owner pushing this branch.
 
 ---
 

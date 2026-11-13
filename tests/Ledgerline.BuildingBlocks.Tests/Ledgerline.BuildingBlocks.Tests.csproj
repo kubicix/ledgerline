@@ -1,5 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <ProjectReference Include="../../src/Contracts/Ledgerline.Contracts/Ledgerline.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Contracts/Samples/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
+
+
+

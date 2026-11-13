@@ -1,0 +1,10 @@
+.git
+.superpowers
+.agents
+.codex
+.vs
+**/bin
+**/obj
+**/TestResults
+**/.env
+orchestrator-prompt.md

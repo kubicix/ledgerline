@@ -1,0 +1,1 @@
+{"paymentId":"00000000-0000-0000-0000-000000000001","kind":"Transfer","customerId":"00000000-0000-0000-0000-000000000002","amountMinor":2500,"currency":"TRY","sourceAccountId":"00000000-0000-0000-0000-000000000003","destinationAccountId":"00000000-0000-0000-0000-000000000004","occurredAt":"2026-11-13T12:00:00+00:00","status":"Failed","reasonCode":"InsufficientFunds"}

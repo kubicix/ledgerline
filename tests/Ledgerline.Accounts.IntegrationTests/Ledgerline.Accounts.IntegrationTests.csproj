@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+    <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
   </ItemGroup>
 </Project>
+
