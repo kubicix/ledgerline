@@ -30,6 +30,11 @@ Final statuses: `Completed`, `Voided`, `Compensated`, `Rejected`, `Failed`,
 UUIDv5(namespace = `paymentId`, name = step name), and for refunds
 UUIDv5(namespace = `refundId`, name = `"RefundFunds"`). Retries reuse it by construction.
 
+An explicit merchant capture uses UUIDv5(namespace = `paymentId`, name =
+`"LedgerCapture:" + Idempotency-Key`). A new capture request after a rejected attempt
+gets a new operation ID; retries of the same request retain it. Automatic capture
+uses the step-name ID. The chosen ID is stored with the capture's `Started` audit row.
+
 Bank idempotency keys: `"<paymentId>:authorize"`, `":capture"`, `":void"`, `":refund"`.
 
 ## 3. HTTP API

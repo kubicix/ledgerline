@@ -524,7 +524,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M2-T14: Payments: merchant payment endpoints, capture, void, expiry
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `payments.md` sections 3, 4.3, 4.6 (expiry), invariants P1, P2. **Depends:** M2-T09, M2-T10, M2-T13.
 **Files:** Create contracts `PaymentAuthorized.cs`, `PaymentCaptured.cs`, `PaymentVoided.cs` plus samples; in Payments `Features/Payments/{CreatePaymentEndpoint.cs,CapturePaymentEndpoint.cs,VoidPaymentEndpoint.cs,ListPaymentsEndpoint.cs}`. Test `tests/Ledgerline.Payments.IntegrationTests/MerchantPaymentFlowTests.cs`.

@@ -5,4 +5,5 @@ public sealed class PaymentSagaOptions
     public bool RiskEnabled { get; init; }
     public bool BankEnabled { get; init; }
     public int BankCompensationMaxAttempts { get; init; } = 8;
+    public TimeSpan AuthorizationTtl { get; init; } = TimeSpan.FromDays(7);
 }

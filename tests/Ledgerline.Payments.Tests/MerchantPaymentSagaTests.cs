@@ -133,4 +133,19 @@ public sealed class MerchantPaymentSagaTests
 
     [Fact]
     public void Automatic_capture_mode_goes_straight_to_LedgerCapture() => M05_automatic_reserve_succeeded_starts_LedgerCapture();
+
+    [Fact]
+    public void Explicit_capture_operation_id_is_used_and_stale_reply_is_ignored()
+    {
+        var payment = Payment(status: PaymentStatus.Authorized);
+        var operation = Guid.NewGuid();
+        var decision = Decide(payment, new SagaInput.CaptureRequested(1000, operation));
+        Command<CaptureFunds>(decision).OperationId.ShouldBe(operation);
+        var capturing = payment with { Status = PaymentStatus.Capturing, Step = SagaStep.LedgerCapture,
+            CaptureRequestedMinor = 1000, CaptureOperationId = operation };
+        Decide(capturing, new SagaInput.LedgerSucceeded(OperationIds.For(payment.Id, SagaStep.LedgerCapture))).Ignored.ShouldBeTrue();
+        Decide(capturing, new SagaInput.LedgerSucceeded(operation)).Status.ShouldBe(PaymentStatus.Captured);
+        OperationIds.ForCapture(payment.Id, "one").ShouldBe(OperationIds.ForCapture(payment.Id, "one"));
+        OperationIds.ForCapture(payment.Id, "one").ShouldNotBe(OperationIds.ForCapture(payment.Id, "two"));
+    }
 }

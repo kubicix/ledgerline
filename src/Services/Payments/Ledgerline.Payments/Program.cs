@@ -39,7 +39,8 @@ builder.Services.AddSingleton(provider =>
     {
         RiskEnabled = configuration.GetValue<bool?>("Saga:RiskEnabled") ?? true,
         BankEnabled = configuration.GetValue<bool?>("Saga:BankEnabled") ?? true,
-        BankCompensationMaxAttempts = configuration.GetValue<int?>("Saga:BankCompensationMaxAttempts") ?? 8
+        BankCompensationMaxAttempts = configuration.GetValue<int?>("Saga:BankCompensationMaxAttempts") ?? 8,
+        AuthorizationTtl = configuration.GetValue<TimeSpan?>("Saga:AuthorizationTtl") ?? TimeSpan.FromDays(7)
     };
 });
 builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));
@@ -66,6 +67,10 @@ app.UseLedgerlineWebDefaults();
 app.MapPost("/topups", CreateTopUpEndpoint.HandleAsync).RequireAuthorization(Policies.Customer).RequireIdempotencyKey();
 app.MapPost("/transfers", CreateTransferEndpoint.HandleAsync).RequireAuthorization(Policies.Customer).RequireIdempotencyKey();
 app.MapGet("/payments/{id:guid}", GetPaymentEndpoint.HandleAsync).RequireAuthorization();
+app.MapPost("/payments", CreatePaymentEndpoint.HandleAsync).RequireAuthorization(Policies.Customer).RequireIdempotencyKey();
+app.MapPost("/payments/{id:guid}/capture", CapturePaymentEndpoint.HandleAsync).RequireAuthorization(Policies.Merchant).RequireIdempotencyKey();
+app.MapPost("/payments/{id:guid}/void", VoidPaymentEndpoint.HandleAsync).RequireAuthorization(policy => policy.RequireRole("merchant", "admin")).RequireIdempotencyKey();
+app.MapGet("/payments", ListPaymentsEndpoint.HandleAsync).RequireAuthorization();
 
 app.Run();
 

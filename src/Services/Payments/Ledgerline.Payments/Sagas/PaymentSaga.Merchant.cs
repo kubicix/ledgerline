@@ -9,19 +9,21 @@ public static partial class PaymentSaga
         if (payment.Status != PaymentStatus.Authorized)
             return new(payment.Status, payment.Step, [], payment.FailureReason, false, InvalidState: true);
         if (input is SagaInput.VoidRequested) return BeginVoid(payment, now, "Requested");
-        var amount = ((SagaInput.CaptureRequested)input).AmountMinor;
+        var capture = (SagaInput.CaptureRequested)input;
+        var amount = capture.AmountMinor;
         return amount <= 0 || amount > payment.AmountMinor
             ? new(payment.Status, payment.Step, [], payment.FailureReason, false, InvalidState: true)
-            : BeginCapture(payment, amount, now);
+            : BeginCapture(payment with { CaptureOperationId = capture.OperationId }, amount, now);
     }
 
-    private static SagaDecision OnMerchantLedger(PaymentSnapshot payment, SagaInput input, DateTimeOffset now)
+    private static SagaDecision OnMerchantLedger(PaymentSnapshot payment, SagaInput input, DateTimeOffset now, PaymentSagaOptions options)
     {
-        var expected = OperationIds.For(payment.Id, payment.Step);
+        var expected = payment.Step == SagaStep.LedgerCapture && payment.CaptureOperationId is { } capture
+            ? capture : OperationIds.For(payment.Id, payment.Step);
         return (payment.Status, payment.Step, input) switch
         {
             (PaymentStatus.Processing, SagaStep.LedgerReserve, SagaInput.LedgerSucceeded reply) when reply.OperationId == expected =>
-                payment.CaptureMode == CaptureMode.Automatic ? BeginCapture(payment, payment.AmountMinor, now) : Authorize(payment, now),
+                payment.CaptureMode == CaptureMode.Automatic ? BeginCapture(payment, payment.AmountMinor, now) : Authorize(payment, now, options.AuthorizationTtl),
             (PaymentStatus.Processing, SagaStep.LedgerReserve, SagaInput.LedgerRejected reply) when reply.OperationId == expected =>
                 Fail(payment, PaymentStatus.Failed, reply.Reason, now),
             (PaymentStatus.Capturing, SagaStep.LedgerCapture, SagaInput.LedgerSucceeded reply) when reply.OperationId == expected => Captured(payment, now),
@@ -32,12 +34,12 @@ public static partial class PaymentSaga
         };
     }
 
-    private static SagaDecision Authorize(PaymentSnapshot payment, DateTimeOffset now)
+    private static SagaDecision Authorize(PaymentSnapshot payment, DateTimeOffset now, TimeSpan ttl)
     {
-        var expires = now.AddDays(7);
+        var expires = now + ttl;
         return new(PaymentStatus.Authorized, SagaStep.None,
             [new SagaEffect.CancelTimeouts(), new SagaEffect.SetAuthorizationExpiresAt(expires),
-                new SagaEffect.ScheduleTimeout(SagaStep.None, TimeSpan.FromDays(7)),
+                new SagaEffect.ScheduleTimeout(SagaStep.None, ttl),
                 new SagaEffect.PublishEvent(new PaymentAuthorized(payment.Id, payment.Kind.ToString(), payment.CustomerId,
                     payment.AmountMinor, payment.Currency, payment.SourceAccountId, payment.DestinationAccountId, now, expires))], null, false);
     }

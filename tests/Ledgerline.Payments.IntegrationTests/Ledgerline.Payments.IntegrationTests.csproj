@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../src/Services/BankSimulator/Ledgerline.BankSimulator/Ledgerline.BankSimulator.csproj" />
+    <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
     <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
     <ProjectReference Include="../../src/Services/Payments/Ledgerline.Payments/Ledgerline.Payments.csproj" />
   </ItemGroup>

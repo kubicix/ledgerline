@@ -40,7 +40,7 @@ public static partial class PaymentSaga
             var bank = OnBank(payment, input, now);
             if (!bank.Ignored) return bank;
         }
-        if (payment.Kind == PaymentKind.MerchantPayment) return OnMerchantLedger(payment, input, now);
+        if (payment.Kind == PaymentKind.MerchantPayment) return OnMerchantLedger(payment, input, now, options);
         if (payment.Step is not (SagaStep.LedgerCredit or SagaStep.LedgerTransfer)) return Ignore(payment);
         if (payment.Status != PaymentStatus.Processing) return Ignore(payment);
         var operationId = OperationIds.For(payment.Id, payment.Step);
@@ -85,7 +85,7 @@ public static partial class PaymentSaga
             payment.DestinationAccountId, payment.AmountMinor, payment.Currency),
         SagaStep.LedgerReserve => new ReserveFunds(OperationIds.For(payment.Id, step), payment.Id,
             payment.SourceAccountId!.Value, payment.AmountMinor, payment.Currency),
-        SagaStep.LedgerCapture => new CaptureFunds(OperationIds.For(payment.Id, step), payment.Id,
+        SagaStep.LedgerCapture => new CaptureFunds(payment.CaptureOperationId ?? OperationIds.For(payment.Id, step), payment.Id,
             payment.DestinationAccountId, payment.CaptureRequestedMinor ?? payment.AmountMinor),
         SagaStep.LedgerRelease => new ReleaseFunds(OperationIds.For(payment.Id, step), payment.Id),
         _ => throw new NotSupportedException("Unsupported saga command step.")
