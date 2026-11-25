@@ -305,12 +305,31 @@ services:
   # Grafana, Tempo, Loki, Prometheus and an OpenTelemetry Collector in one dev container.
   otel-lgtm:
     image: grafana/otel-lgtm:0.41.0
+    # No swap for this container (memswap_limit equal to mem_limit). Without it the memory reclaim of the
+    # Docker Desktop VM pushed about 200 MB of the in-memory telemetry below to the swap disk per load run, which sits
+    # on the same physical drive. 4 GiB covers the 2 GiB of tmpfs caps plus about 1.5 GiB of process memory measured
+    # under load; above that the kernel kills a process in this container only.
+    mem_limit: 4g
+    memswap_limit: 4g
     ports:
       - "3000:3000" # Grafana
       - "4317:4317" # OTLP gRPC
       - "4318:4318" # OTLP HTTP
     volumes:
+      # /data/grafana stays on the volume: it holds the plugins Grafana downloads at first start (about 650 MB) and
+      # Grafana's own small database. Dashboards and data sources come from the provisioning files, not from /data.
       - lgtm-data:/data
+      # Loki, Tempo, Prometheus and Pyroscope data live in memory. They wrote about 1 MB/s under the k6 smoke, more
+      # than Postgres or RabbitMQ, onto the same disk that serves the fsyncs of commits and publisher confirms.
+      # Telemetry is disposable in this dev stack: it is lost when the container restarts, which is accepted.
+      # The size caps (2 GiB in total) bound memory use. When a cap is reached, that store rejects new data until the
+      # container restarts; the container, Grafana, Prometheus and the services keep working (tested with 4 MB caps).
+      - { type: tmpfs, target: /data/loki, tmpfs: { size: 536870912 } }
+      - { type: tmpfs, target: /data/tempo, tmpfs: { size: 536870912 } }
+      # Tempo 3 keeps its live-store (recent traces) here, outside /data, in the container layer on the same disk.
+      - { type: tmpfs, target: /var/tempo, tmpfs: { size: 536870912 } }
+      - { type: tmpfs, target: /data/prometheus, tmpfs: { size: 268435456 } }
+      - { type: tmpfs, target: /data/pyroscope, tmpfs: { size: 268435456 } }
       # Grafana reads conf/provisioning/dashboards/*.yaml at startup (path taken from the image's own
       # grafana-dashboards.yaml and defaults.ini). The JSON directory is ours, outside /data and /otel-lgtm.
       - ./deploy/observability/provisioning/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ledgerline.yaml:ro
