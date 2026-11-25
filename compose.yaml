@@ -309,6 +309,10 @@ services:
       - "4318:4318" # OTLP HTTP
     volumes:
       - lgtm-data:/data
+      # Grafana reads conf/provisioning/dashboards/*.yaml at startup (path taken from the image's own
+      # grafana-dashboards.yaml and defaults.ini). The JSON directory is ours, outside /data and /otel-lgtm.
+      - ./deploy/observability/provisioning/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ledgerline.yaml:ro
+      - ./deploy/observability/dashboards:/etc/ledgerline/dashboards:ro
 
   mailpit:
     image: axllent/mailpit:v1.33.1

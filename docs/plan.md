@@ -619,7 +619,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T03: Grafana dashboards as code
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009. **Depends:** M3-T02.
 **Files:** Create `deploy/observability/dashboards/ledgerline-overview.json` (panels: request rate and p95 per service, saga duration p50/p95 by kind, saga outcomes, outbox pending and lag p95 per service, inbox duplicates rate, consumer retries and dead letters, ledger posting duration p95, ledger imbalance stat, manual review stat), `deploy/observability/provisioning/dashboards.yaml`; modify `compose.yaml` (mount both into `otel-lgtm`; check the image documentation for the provisioning paths, they are not verified here). Create `docs/observability.md` (how to open the dashboard and find a trace by payment ID).
