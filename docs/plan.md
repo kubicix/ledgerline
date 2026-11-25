@@ -659,7 +659,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T07: System failure test: replay every message
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F3 system row. **Depends:** M3-T05.
 **Files:** `tests/Ledgerline.SystemTests/Harness/ReplayShovel.cs` (binds an exclusive queue with `#` to the three exchanges, re-publishes every message once with the same `messageId` and once with a new `messageId`), `ReplaySystemTests.cs`. Expose RabbitMQ port in the system test Compose project only.
