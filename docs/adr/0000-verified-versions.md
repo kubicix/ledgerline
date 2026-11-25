@@ -36,7 +36,12 @@ ADR refers to it instead of repeating numbers.
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3 | PostgreSQL | EF Core provider |
 | StackExchange.Redis | 3.4.35 | MIT | Idempotency cache, velocity windows, locks |
 | Yarp.ReverseProxy | 2.3.0 | MIT | Gateway. Targets net8.0 at most; runs on net10.0 |
-| OpenTelemetry.* (Extensions.Hosting, OTLP exporter, AspNetCore instrumentation) | 1.21.0 | Apache-2.0 | Observability |
+| OpenTelemetry.Extensions.Hosting | 1.21.0 | Apache-2.0 | Observability. Re-verified on nuget.org on 2026-11-25 (M3), with the four rows below |
+| OpenTelemetry.Exporter.OpenTelemetryProtocol | 1.21.0 | Apache-2.0 | OTLP export of traces, metrics, logs |
+| OpenTelemetry.Instrumentation.AspNetCore | 1.21.0 | Apache-2.0 | Versions independently of the SDK; 1.21.0 is the latest stable |
+| OpenTelemetry.Instrumentation.Http | 1.21.0 | Apache-2.0 | Versions independently of the SDK; 1.21.0 is the latest stable |
+| Npgsql.OpenTelemetry | 10.0.3 | PostgreSQL | Npgsql tracing. Depends on Npgsql 10.0.3, the version the solution resolves (10.0.4 exists and would pull Npgsql 10.0.4) |
+| OpenTelemetry.Exporter.InMemory | 1.21.0 | Apache-2.0 | Tests only (`TracingTests`) |
 | Microsoft.Extensions.Http.Resilience | 10.11.0 | MIT | Bank HTTP client retries and timeouts |
 | xunit.v3 | 4.0.3 | Apache-2.0 | Tests |
 | Shouldly | 4.3.0 | BSD-3-Clause | Assertions |
@@ -89,6 +94,12 @@ Considered and not used:
 | azure/setup-helm | v5 |
 | grafana/setup-k6-action | v1 |
 | github/codeql-action | Major version **not verified** (the releases API returns bundle tags). Check the action README at M3 |
+
+## Specifications
+
+| Item | Status | Note |
+|---|---|---|
+| OpenTelemetry messaging semantic conventions | Development (not stable), release v1.45.0 of 2026-11-02 | Checked in the `open-telemetry/semantic-conventions` repository on 2026-11-25. v1.45.0 renamed `messaging.system` to `messaging.system.name`. Ledgerline spans emit both, plus `messaging.destination.name` and `messaging.message.id` |
 
 ## Not verified
 

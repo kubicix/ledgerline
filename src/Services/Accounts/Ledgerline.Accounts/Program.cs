@@ -5,6 +5,7 @@ using Ledgerline.Accounts.Features.Ledger;
 using Ledgerline.Accounts.Ledger;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.Contracts.Accounts;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,6 +25,7 @@ if (command == "rebuild-projections")
         ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
     return;
 }
+builder.AddLedgerlineTelemetry("accounts");
 builder.AddLedgerlineWebDefaults("accounts");
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<AccountsDbContext>((services, options) =>

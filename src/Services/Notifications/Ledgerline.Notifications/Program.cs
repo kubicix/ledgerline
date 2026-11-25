@@ -1,5 +1,6 @@
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
 using Ledgerline.Notifications.Features.List;
@@ -17,6 +18,7 @@ if (migrate)
         ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
     return;
 }
+builder.AddLedgerlineTelemetry("notifications");
 builder.AddLedgerlineWebDefaults("notifications");
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<NotificationsDbContext>((services, options) =>

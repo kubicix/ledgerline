@@ -1,5 +1,6 @@
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.BuildingBlocks.Web.Auth;
 using Ledgerline.BuildingBlocks.Web.Idempotency;
 using Ledgerline.Contracts.Accounts;
@@ -28,6 +29,7 @@ if (command == "migrate")
         ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
     return;
 }
+builder.AddLedgerlineTelemetry("payments");
 builder.AddLedgerlineWebDefaults("payments");
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>

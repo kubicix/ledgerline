@@ -599,7 +599,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T01: OpenTelemetry wiring and one trace across the broker
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009; `building-blocks.md` section 9 (Telemetry). **Depends:** M2 complete.
 **Files:** Create in Web `Telemetry/TelemetryExtensions.cs`; in Messaging `Diagnostics/MessagingActivitySource.cs` (source name `Ledgerline.Messaging`), modify `OutboxRelay.cs`, `RabbitMqOutboxPublisher.cs`, `ConsumerHost.cs`. Add `OpenTelemetry.Extensions.Hosting`, `OpenTelemetry.Exporter.OpenTelemetryProtocol`, `OpenTelemetry.Instrumentation.AspNetCore`, `OpenTelemetry.Instrumentation.Http` 1.21.0 (check the exact latest version of each instrumentation package on nuget.org; they version independently), and an Npgsql OpenTelemetry package matching the Npgsql version. Modify every service `Program.cs` (`builder.AddLedgerlineTelemetry("<service>")`), `compose.yaml` (`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4317`). Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/TracingTests.cs` (in-memory exporter from `OpenTelemetry.Exporter.InMemory`).

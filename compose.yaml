@@ -61,6 +61,7 @@ services:
       ConnectionStrings__Redis: redis:6379
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
       ASPNETCORE_ENVIRONMENT: Development
     depends_on:
@@ -96,6 +97,7 @@ services:
       ConnectionStrings__Redis: redis:6379
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
       ASPNETCORE_ENVIRONMENT: Development
     depends_on:
@@ -162,6 +164,7 @@ services:
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
     depends_on:
       risk-migrate: { condition: service_completed_successfully }
@@ -182,6 +185,7 @@ services:
       Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
       Smtp__Host: mailpit
       Smtp__Port: "1025"
@@ -203,6 +207,7 @@ services:
       Bank__ApiKey: ${BANK_API_KEY:-ledgerline-bank-local-dev}
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
     depends_on:
       banksim-migrate: { condition: service_completed_successfully }
@@ -218,6 +223,7 @@ services:
     environment:
       Auth__Authority: http://keycloak:8081/realms/ledgerline
       Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Auth__RequireHttpsMetadata: "false"
     depends_on:
       accounts: { condition: service_healthy }

@@ -1,3 +1,4 @@
+using Ledgerline.BuildingBlocks.Messaging.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,18 +57,23 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
     private async Task<bool> PublishOneAsync(OutboxMessage row, CancellationToken ct)
     {
         crashPoint.Hit("relay.before-publish");
-        try
+        // The PRODUCER span covers only the publish and its broker confirm; it never changes what is published or when.
+        using (var activity = MessagingActivitySource.StartPublish(row))
         {
-            await publisher.PublishAsync(row, ct);
-        }
-        catch (PublishFailedException error)
-        {
-            row.Attempts++;
-            row.LastError = error.Message;
-            row.NextAttemptAt = clock.UtcNow.AddMilliseconds(Math.Min(Math.Pow(2, row.Attempts) * 100, 30_000));
-            if (!publicationFailed) PublicationFailed(logger, error);
-            publicationFailed = true;
-            return false;
+            try
+            {
+                await publisher.PublishAsync(row, ct);
+            }
+            catch (PublishFailedException error)
+            {
+                MessagingActivitySource.RecordError(activity, error);
+                row.Attempts++;
+                row.LastError = error.Message;
+                row.NextAttemptAt = clock.UtcNow.AddMilliseconds(Math.Min(Math.Pow(2, row.Attempts) * 100, 30_000));
+                if (!publicationFailed) PublicationFailed(logger, error);
+                publicationFailed = true;
+                return false;
+            }
         }
         crashPoint.Hit("relay.after-publish");
         row.ProcessedAt = clock.UtcNow;

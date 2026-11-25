@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
+using Ledgerline.BuildingBlocks.Messaging.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +15,6 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
     IServiceScopeFactory scopes, IAckStrategy acknowledgments, ConsumerOptions options, IClock clock, ICrashPoint crashPoint,
     ILogger<ConsumerHost<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
 {
-    private static readonly ActivitySource Activities = new("Ledgerline.Messaging");
     private static readonly Meter Metrics = new("Ledgerline");
     private static readonly Counter<long> Duplicates = Metrics.CreateCounter<long>("ledgerline.inbox.duplicates");
     private static readonly Counter<long> Retries = Metrics.CreateCounter<long>("ledgerline.consumer.retries");
@@ -151,8 +150,13 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
 
     private async Task ProcessAsync(MessageEnvelope envelope, int attempt, CancellationToken ct)
     {
-        ActivityContext.TryParse(envelope.TraceParent, null, out var parent);
-        using var activity = Activities.StartActivity(envelope.Type, ActivityKind.Consumer, parent);
+        using var activity = MessagingActivitySource.StartProcess(envelope, Topology.InboxQueue(options.Service));
+        try { await ProcessInTransactionAsync(envelope, attempt, ct); }
+        catch (Exception error) when (MessagingActivitySource.RecordError(activity, error)) { throw; }
+    }
+
+    private async Task ProcessInTransactionAsync(MessageEnvelope envelope, int attempt, CancellationToken ct)
+    {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);

@@ -1,9 +1,11 @@
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.Gateway;
 using Yarp.ReverseProxy.Forwarder;
 using Microsoft.AspNetCore.Http.Timeouts;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddLedgerlineTelemetry("gateway");
 builder.AddLedgerlineWebDefaults("gateway");
 builder.AddGatewayRateLimiting();
 builder.Services.AddRequestTimeouts();
