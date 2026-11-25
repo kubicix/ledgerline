@@ -1,4 +1,3 @@
-using System.Diagnostics.Metrics;
 using Ledgerline.BuildingBlocks;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Messaging.Outbox;
@@ -12,12 +11,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Ledgerline.Payments.Sagas;
 
 public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock clock, ICrashPoint crashPoint,
-    TimeoutOptions timeoutOptions, PaymentSagaOptions sagaOptions) : IPostCommitHook
+    TimeoutOptions timeoutOptions, PaymentSagaOptions sagaOptions, SagaMetrics metrics) : IPostCommitHook
 {
-    private static readonly Meter Meter = new("Ledgerline.Payments");
-    private static readonly Counter<long> ManualReviews = Meter.CreateCounter<long>("ledgerline.saga.manual_review");
     private bool transitioned;
     private bool manualReview;
+    private (PaymentKind Kind, PaymentStatus Outcome, TimeSpan Elapsed)? finished;
     private Guid? lastCommandMessageId;
 
     public async Task StartAsync(Payment payment, CancellationToken ct = default)
@@ -73,6 +71,9 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
     private async Task ApplyDecisionAsync(Payment payment, SagaDecision decision, string outcome,
         SagaStep? auditedStep, MessageContext? context, CancellationToken ct)
     {
+        // Measured only on the step into a final status; recorded after commit, in OnCommitted.
+        finished = !PaymentSaga.IsFinal(payment.Status) && PaymentSaga.IsFinal(decision.Status)
+            ? (payment.Kind, decision.Status, clock.UtcNow - payment.CreatedAt) : null;
         payment.Status = decision.Status;
         payment.SagaStep = decision.Step;
         payment.FailureReason = decision.FailureReason;
@@ -205,7 +206,9 @@ public sealed class SagaRunner(PaymentsDbContext db, IOutbox outbox, IClock cloc
     {
         if (!transitioned) return;
         transitioned = false;
-        if (manualReview) ManualReviews.Add(1);
+        if (finished is { } done) metrics.Finished(done.Kind, done.Outcome, done.Elapsed);
+        finished = null;
+        if (manualReview) metrics.ManualReview();
         crashPoint.Hit("saga.after-transition-commit");
     }
 }

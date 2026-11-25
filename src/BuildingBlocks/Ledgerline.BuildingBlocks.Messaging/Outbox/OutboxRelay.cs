@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,10 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
     OutboxSignal signal, RelayOptions options, IClock clock, ICrashPoint crashPoint,
     ILogger<OutboxRelay<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
 {
+    private static readonly TimeSpan PendingRefreshInterval = TimeSpan.FromSeconds(1);
+    private readonly MessagingMetrics metrics = new(options.Service);
     private bool publicationFailed;
+    private long pendingCountedAt;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -19,7 +23,12 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
         {
             try
             {
-                while (await PublishBatchAsync(stoppingToken)) { }
+                bool more;
+                do
+                {
+                    more = await PublishBatchAsync(stoppingToken);
+                    await RefreshPendingAsync(stoppingToken);
+                } while (more);
             }
             catch (HostAbortedException) { return; }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
@@ -78,11 +87,31 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
                 return false;
             }
         }
+        // OccurredAt is set at enqueue inside the committing transaction, so it stands in for the commit time.
+        metrics.RecordLag(clock.UtcNow - row.OccurredAt);
         crashPoint.Hit("relay.after-publish");
         row.ProcessedAt = clock.UtcNow;
         if (publicationFailed) PublicationRecovered(logger);
         publicationFailed = false;
         return true;
+    }
+
+    /// <summary>
+    /// Records the backlog for the pending gauge at most once per interval, in its own scope and outside the publish
+    /// transaction, so it never changes what is published or when. During a broker outage the batch returns early and
+    /// this still runs, so the gauge rises.
+    /// </summary>
+    private async Task RefreshPendingAsync(CancellationToken ct)
+    {
+        if (pendingCountedAt != 0 && Stopwatch.GetElapsedTime(pendingCountedAt) < PendingRefreshInterval) return;
+        pendingCountedAt = Stopwatch.GetTimestamp();
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
+            metrics.RecordPending(await db.Set<OutboxMessage>().LongCountAsync(x => x.ProcessedAt == null, ct));
+        }
+        catch (Exception error) when (error is not OperationCanceledException) { PendingCountFailed(logger, error); }
     }
 
     [LoggerMessage(1, LogLevel.Warning, "Outbox publication failed; pending rows will be retried.")]
@@ -91,4 +120,6 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
     private static partial void PublicationRecovered(ILogger logger);
     [LoggerMessage(3, LogLevel.Error, "Outbox batch failed; pending rows remain available for retry.")]
     private static partial void LoopFailed(ILogger logger, Exception error);
+    [LoggerMessage(4, LogLevel.Warning, "Outbox pending count failed; the pending gauge keeps its last value.")]
+    private static partial void PendingCountFailed(ILogger logger, Exception error);
 }

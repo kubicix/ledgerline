@@ -67,7 +67,8 @@ public static class MessagingServiceCollectionExtensions
         services.AddSingleton(_ => new RelayOptions
         {
             PollIntervalMs = ReadInt(configuration, "Relay:PollIntervalMs", 250),
-            BatchSize = ReadInt(configuration, "Relay:BatchSize", 100)
+            BatchSize = ReadInt(configuration, "Relay:BatchSize", 100),
+            Service = service
         });
         services.AddSingleton(_ => new ConsumerOptions
         {

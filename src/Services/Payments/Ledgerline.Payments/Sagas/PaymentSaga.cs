@@ -152,7 +152,7 @@ public static partial class PaymentSaga
 
     private static SagaDecision Ignore(PaymentSnapshot payment) => new(payment.Status, payment.Step, [], payment.FailureReason, true);
 
-    private static bool IsFinal(PaymentStatus status) => status is PaymentStatus.Completed or PaymentStatus.Voided or PaymentStatus.Compensated
+    internal static bool IsFinal(PaymentStatus status) => status is PaymentStatus.Completed or PaymentStatus.Voided or PaymentStatus.Compensated
         or PaymentStatus.Rejected or PaymentStatus.Failed or PaymentStatus.ManualReview or PaymentStatus.Captured;
 
 }

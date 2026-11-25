@@ -33,6 +33,9 @@ builder.Services.AddDbContext<AccountsDbContext>((services, options) =>
 builder.Services.AddScoped<EventStore>();
 builder.Services.AddScoped<ILedger, Ledgerline.Accounts.Ledger.Ledger>();
 builder.Services.AddScoped<Holds>();
+builder.Services.AddSingleton(new LedgerMetricsOptions());
+builder.Services.AddSingleton<LedgerMetrics>();
+builder.Services.AddHostedService(services => services.GetRequiredService<LedgerMetrics>());
 builder.Services.AddScoped<LedgerOperationRunner>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<LedgerOperationRunner>());
 builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging => messaging.Service("accounts")

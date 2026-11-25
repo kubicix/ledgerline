@@ -609,7 +609,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T02: Custom metrics
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009 metric table. **Depends:** M3-T01.
 **Files:** Create in Messaging `Diagnostics/MessagingMetrics.cs`; in Payments `Sagas/SagaMetrics.cs`; in Accounts `Ledger/LedgerMetrics.cs` (the imbalance gauge reads a cached trial balance refreshed every 15 s). Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/MetricsTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/MetricsTests.cs`, `tests/Ledgerline.Accounts.IntegrationTests/MetricsTests.cs` (use `MeterListener`).

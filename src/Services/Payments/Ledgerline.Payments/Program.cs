@@ -34,6 +34,7 @@ builder.AddLedgerlineWebDefaults("payments");
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
+builder.Services.AddSingleton<SagaMetrics>();
 builder.Services.AddScoped<SagaRunner>();
 builder.Services.AddScoped<RefundRunner>();
 builder.Services.AddScoped<RefundRecovery>();

@@ -1,4 +1,3 @@
-using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Ledgerline.BuildingBlocks.Messaging.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
@@ -15,10 +14,7 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
     IServiceScopeFactory scopes, IAckStrategy acknowledgments, ConsumerOptions options, IClock clock, ICrashPoint crashPoint,
     ILogger<ConsumerHost<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
 {
-    private static readonly Meter Metrics = new("Ledgerline");
-    private static readonly Counter<long> Duplicates = Metrics.CreateCounter<long>("ledgerline.inbox.duplicates");
-    private static readonly Counter<long> Retries = Metrics.CreateCounter<long>("ledgerline.consumer.retries");
-    private static readonly Counter<long> DeadLetters = Metrics.CreateCounter<long>("ledgerline.consumer.dead_lettered");
+    private readonly MessagingMetrics metrics = new(options.Service);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -138,8 +134,8 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
             if (deadReason is not null) properties.Headers["x-ledgerline-dead-reason"] = deadReason;
             await publishing.BasicPublishAsync("", queue, true, properties, delivery.Body, timeout.Token);
             await acknowledgments.AckAsync(channel, delivery.DeliveryTag, ct);
-            if (deadReason is null) Retries.Add(1);
-            else DeadLetters.Add(1);
+            if (deadReason is null) metrics.Retried();
+            else metrics.DeadLettered();
         }
         catch (Exception error)
         {
@@ -168,7 +164,7 @@ public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connecti
         if (inserted == 0)
         {
             await transaction.RollbackAsync(ct);
-            Duplicates.Add(1);
+            metrics.Duplicate();
             return;
         }
         var context = new MessageContext(envelope.MessageId, envelope.CorrelationId, envelope.CausationId, attempt);
