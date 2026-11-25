@@ -669,7 +669,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T08: k6 library, smoke and steady scenarios
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 5. **Depends:** M2-T19.
 **Files:** `tests/k6/lib/{auth.js,api.js,setup.js,saga.js,thresholds.js}`, `tests/k6/{smoke.js,topup-steady.js,transfer-steady.js}`, `scripts/k6.sh` and `scripts/k6.ps1` (wrap the `docker run grafana/k6:2.4.0` command, write `--summary-export` to `docs/results/raw/<scenario>-<date>.json`). First confirm the k6 2.x script API for `http`, `scenarios`, `thresholds`, and custom `Trend` against the k6 documentation; adjust if 2.x changed them.

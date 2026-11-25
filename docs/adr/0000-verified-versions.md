@@ -75,7 +75,7 @@ Considered and not used:
 | axllent/mailpit | v1.33.1 | Fake SMTP with a web UI |
 | apache/kafka | 4.4.0 | Phase 2. KRaft mode, no ZooKeeper |
 | mongo | 9.0 (9.0.8) | Phase 2. Re-verify at M5; 8.0 is the fallback |
-| grafana/k6 | 2.4.0 | Load tests |
+| grafana/k6 | 2.4.0 | Load tests. Pulled on 2026-11-25: digest `sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276`, `k6 version` prints `k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)`. Script API checked for M3-T08, see below |
 
 ## Tools and GitHub Actions
 
@@ -100,6 +100,29 @@ Considered and not used:
 | Item | Status | Note |
 |---|---|---|
 | OpenTelemetry messaging semantic conventions | Development (not stable), release v1.45.0 of 2026-11-02 | Checked in the `open-telemetry/semantic-conventions` repository on 2026-11-25. v1.45.0 renamed `messaging.system` to `messaging.system.name`. Ledgerline spans emit both, plus `messaging.destination.name` and `messaging.message.id` |
+
+## k6 2.x script API (checked 2026-11-25 for M3-T08)
+
+Sources: the k6 v2 migration guide (`grafana.com/docs/k6/latest/get-started/migrating-to-v2/`), the `latest` docs pages
+for `k6/http` `setResponseCallback` and `expectedStatuses`, thresholds, `k6/metrics` `Trend` and the
+`constant-arrival-rate` executor, and throwaway scripts run in `grafana/k6:2.4.0` itself.
+
+- Unchanged in 2.x and used as documented: `k6/http` (`http.get`, `http.post`, `http.put`, per-request `tags` and
+  `responseCallback`, `http.expectedStatuses`), `options.scenarios` with `constant-vus` and `constant-arrival-rate`
+  (`rate`, `timeUnit`, `duration`, `preAllocatedVUs`, `maxVUs`, `exec`, scenario `tags`), `options.thresholds` with
+  tagged sub-metrics (several tags in one selector, for example `http_req_duration{phase:load,op:accept}`, work), and
+  `new Trend(name, true)` with `add(value, tags)`.
+- Removed in 2.0: `--no-summary` (use `--summary-mode=disabled`), `--summary-mode=legacy`, the `externally-controlled`
+  executor, `options.ext.loadimpact`, `k6/experimental/redis`. None is used here.
+- `k6 run --summary-export <file>` still exists in 2.4.0 (`k6 run --help`). In the exported JSON a threshold value of
+  `false` means the threshold passed.
+- Measured in 2.4.0: a crossed threshold exits 99; an exception thrown in `teardown()` exits 107; a threshold on a tagged
+  sub-metric with no samples passes (`p(95)` reads 0), so the scenarios pair each saga trend with a `count>0` guard;
+  metrics added in `teardown()` count toward thresholds; requests in `setup()` and `teardown()` carry no scenario tags
+  (only `group` `::setup` or `::teardown`); the `--summary-export` JSON includes the value `setup()` returned
+  (`setup_data`) unless an exported `handleSummary(data)` deletes `data.setup_data`, which it does before the export
+  is written; a `handleSummary` that returns `undefined` keeps the default end-of-test summary on stdout.
+  `k6/summary` is not a built-in module.
 
 ## Not verified
 
