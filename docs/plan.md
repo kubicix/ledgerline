@@ -649,7 +649,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T06: System failure tests: broker outage and service kills
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F1 and F2 system rows. **Depends:** M3-T05.
 **Files:** `tests/Ledgerline.SystemTests/FailureSystemTests.cs`.

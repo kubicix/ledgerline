@@ -25,6 +25,9 @@ public sealed class ComposeStack : IAsyncDisposable
     private readonly SemaphoreSlim gate = new(1, 1);
     private bool attempted; // An up ran in this session: logs are worth collecting and down is ours to run.
     private bool built;     // An up with --build succeeded in this session.
+    private readonly SemaphoreSlim velocityGate = new(1, 1);
+    private RiskRuleDto? velocityRestore; // Set once a raise was sent; DisposeAsync puts these values back.
+    private bool velocityRaised;          // The raise was sent and Risk restarted with it.
 
     public static bool Enabled => Environment.GetEnvironmentVariable("LEDGERLINE_SYSTEM_TESTS") == "1";
 
@@ -71,6 +74,34 @@ public sealed class ComposeStack : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Raises Risk's velocity rule to <see cref="RiskRules.RaisedVelocityMaxCount"/> (same window) once per test process,
+    /// so workloads of many payments from the two seeded customers are not Rejected, then restarts Risk because it caches
+    /// its rules for 10 s. Later and concurrent calls wait for the first and do nothing; a failed attempt is retried by the
+    /// next call. The rule is restored in <see cref="DisposeAsync"/>, before <c>down</c>. Call after <see cref="UpAsync"/>.
+    /// </summary>
+    public async Task EnsureVelocityRaisedAsync(CancellationToken ct = default)
+    {
+        await velocityGate.WaitAsync(ct);
+        try
+        {
+            if (velocityRaised) return;
+            using var client = LedgerlineClient.CreateDefault();
+            var current = await RiskRules.GetVelocityRuleAsync(client, ct);
+            // Registered before the PUT, so a PUT that committed but whose answer was lost is still restored. Kept from the
+            // first attempt: a retry would read the raised value back as its "original".
+            velocityRestore ??= RiskRules.RestoreTarget(current);
+            await RiskRules.UpdateAsync(client, current with { MaxCount = RiskRules.RaisedVelocityMaxCount, Enabled = true }, ct);
+            await StopAsync("risk", ct);
+            await StartAsync("risk", ct);
+            velocityRaised = true;
+        }
+        finally
+        {
+            velocityGate.Release();
+        }
+    }
+
     /// <summary><c>docker compose stop service</c>: graceful stop (SIGTERM, then SIGKILL after the grace period).</summary>
     public Task StopAsync(string service, CancellationToken ct = default) => RunCheckedAsync(["stop", service], ct);
 
@@ -80,6 +111,18 @@ public sealed class ComposeStack : IAsyncDisposable
 
     /// <summary><c>docker compose kill -s KILL service</c>: the process dies without any shutdown code.</summary>
     public Task KillAsync(string service, CancellationToken ct = default) => RunCheckedAsync(["kill", "-s", "KILL", service], ct);
+
+    /// <summary>
+    /// <c>docker compose exec -T service command</c>: runs a command inside a running service container and returns its
+    /// standard output (standard error is kept out of it). Throws when the command exits non-zero.
+    /// </summary>
+    public async Task<string> ExecAsync(string service, IReadOnlyList<string> command, CancellationToken ct = default)
+    {
+        var result = await ComposeAsync(["exec", "-T", service, .. command], CommandTimeout, ct);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"docker compose exec {service} failed with exit code {result.ExitCode}.{Environment.NewLine}{Tail(result.Output)}");
+        return result.StandardOutput;
+    }
 
     /// <summary>Writes <c>docker compose logs</c> to a file under the test output directory and returns its path.</summary>
     public async Task<string> CollectLogsAsync(string name)
@@ -104,6 +147,19 @@ public sealed class ComposeStack : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Also with LEDGERLINE_SYSTEM_TESTS_KEEP=1: a kept stack must not keep the raised limit.
+        if (velocityRestore is { } restore)
+        {
+            try
+            {
+                using var client = LedgerlineClient.CreateDefault();
+                await RiskRules.UpdateAsync(client, restore, CancellationToken.None);
+            }
+            catch (Exception error) // Teardown must not fail the session; the next run restores the seeded rule instead.
+            {
+                TestContext.Current.SendDiagnosticMessage($"Restoring the Risk velocity rule failed: {error.Message}");
+            }
+        }
         if (attempted && !KeepRunning)
         {
             var down = await ComposeAsync(["down"], CommandTimeout, CancellationToken.None);
@@ -111,6 +167,7 @@ public sealed class ComposeStack : IAsyncDisposable
                 TestContext.Current.SendDiagnosticMessage($"docker compose -p {ProjectName} down failed with exit code {down.ExitCode}: {Tail(down.Output)}");
         }
         gate.Dispose();
+        velocityGate.Dispose();
     }
 
     private async Task RunCheckedAsync(IReadOnlyList<string> arguments, CancellationToken ct)
@@ -145,7 +202,11 @@ public sealed class ComposeStack : IAsyncDisposable
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = info };
         var output = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
+        var standardOutput = new StringBuilder();
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null) lock (output) { output.AppendLine(e.Data); standardOutput.AppendLine(e.Data); }
+        };
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
         process.Start();
         process.BeginOutputReadLine();
@@ -163,7 +224,7 @@ public sealed class ComposeStack : IAsyncDisposable
             throw new TimeoutException($"{fileName} {string.Join(' ', arguments)} did not finish within {timeout}.");
         }
         process.WaitForExit(); // Flushes the asynchronous output handlers.
-        lock (output) return new CommandResult(process.ExitCode, output.ToString());
+        lock (output) return new CommandResult(process.ExitCode, output.ToString(), standardOutput.ToString());
     }
 
     private static string Seconds(TimeSpan value) => ((int)value.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -178,5 +239,5 @@ public sealed class ComposeStack : IAsyncDisposable
         throw new InvalidOperationException("Repository root with compose.yaml not found above " + AppContext.BaseDirectory);
     }
 
-    private sealed record CommandResult(int ExitCode, string Output);
+    private sealed record CommandResult(int ExitCode, string Output, string StandardOutput);
 }

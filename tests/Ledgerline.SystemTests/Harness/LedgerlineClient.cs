@@ -132,6 +132,14 @@ public sealed class LedgerlineClient(HttpClient http, KeycloakTokens tokens) : I
         return await ReadAsync<T>(response, "POST " + path, ct);
     }
 
+    /// <summary>PUT without an Idempotency-Key (the admin endpoints using it are idempotent by nature); retried like a GET.</summary>
+    public async Task<T> PutAsync<T>(string user, string path, object body, CancellationToken ct = default)
+    {
+        using var response = await SendWithRetryAsync(user,
+            () => new HttpRequestMessage(HttpMethod.Put, path) { Content = JsonContent.Create(body, options: Json) }, retryNotFound: false, ct);
+        return await ReadAsync<T>(response, "PUT " + path, ct);
+    }
+
     public void Dispose() => http.Dispose();
 
     private async Task<HttpResponseMessage> SendWithRetryAsync(string user, Func<HttpRequestMessage> create, bool retryNotFound, CancellationToken ct)

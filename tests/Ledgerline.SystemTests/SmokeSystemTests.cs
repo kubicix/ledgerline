@@ -10,6 +10,7 @@ public sealed class SmokeSystemTests(ComposeStack stack) : IAsyncDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         await stack.UpAsync(ct);
+        await stack.EnsureVelocityRaisedAsync(ct);
         using var client = LedgerlineClient.CreateDefault();
         var wallets = await Workloads.EnsureSmokeWalletsAsync(client, ct);
         var run = await SystemRun.StartAsync(client, wallets.All, ct);

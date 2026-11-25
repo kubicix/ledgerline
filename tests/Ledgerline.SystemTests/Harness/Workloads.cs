@@ -105,11 +105,29 @@ public static class Workloads
         return payment;
     }
 
-    /// <summary>Starts <paramref name="count"/> top-ups concurrently and returns once all were accepted (not completed).</summary>
-    public static Task<PaymentDto[]> TopUpsAsync(LedgerlineClient client, SystemRun run, WalletRef wallet, int count, long amountMinor, CancellationToken ct = default) =>
-        Task.WhenAll(Enumerable.Range(0, count).Select(_ => TopUpAsync(client, run, wallet, amountMinor, ct)));
+    /// <summary>
+    /// At most this many POSTs of one bulk call are open at a time. Every service shares one Postgres (max_connections 100)
+    /// and each open POST holds a pooled payments connection, so an unbounded burst of 100 POSTs exhausts the server's
+    /// connection slots (SQLSTATE 53300) and Payments answers 500.
+    /// </summary>
+    public const int MaxConcurrentRequests = 8;
 
-    /// <summary>Starts <paramref name="count"/> transfers concurrently and returns once all were accepted (not completed).</summary>
+    /// <summary>Starts <paramref name="count"/> top-ups, <see cref="MaxConcurrentRequests"/> at a time, and returns once all were accepted (not completed).</summary>
+    public static Task<PaymentDto[]> TopUpsAsync(LedgerlineClient client, SystemRun run, WalletRef wallet, int count, long amountMinor, CancellationToken ct = default) =>
+        BoundedAsync(count, () => TopUpAsync(client, run, wallet, amountMinor, ct), ct);
+
+    /// <summary>Starts <paramref name="count"/> transfers, <see cref="MaxConcurrentRequests"/> at a time, and returns once all were accepted (not completed).</summary>
     public static Task<PaymentDto[]> TransfersAsync(LedgerlineClient client, SystemRun run, WalletRef from, WalletRef to, int count, long amountMinor, CancellationToken ct = default) =>
-        Task.WhenAll(Enumerable.Range(0, count).Select(_ => TransferAsync(client, run, from, to, amountMinor, ct)));
+        BoundedAsync(count, () => TransferAsync(client, run, from, to, amountMinor, ct), ct);
+
+    private static async Task<PaymentDto[]> BoundedAsync(int count, Func<Task<PaymentDto>> start, CancellationToken ct)
+    {
+        using var slots = new SemaphoreSlim(MaxConcurrentRequests);
+        return await Task.WhenAll(Enumerable.Range(0, count).Select(async _ =>
+        {
+            await slots.WaitAsync(ct);
+            try { return await start(); }
+            finally { slots.Release(); }
+        }));
+    }
 }
