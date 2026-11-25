@@ -34,9 +34,12 @@ public sealed partial class OutboxRelay<TDbContext>(IServiceScopeFactory scopes,
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var head = await db.Set<OutboxMessage>().Where(x => x.ProcessedAt == null).OrderBy(x => x.Sequence)
-            .Select(x => (DateTimeOffset?)x.NextAttemptAt).FirstOrDefaultAsync(ct);
-        if (head > clock.UtcNow) return false;
+        // The head gate uses the same transaction now() as the batch select, so a head row that is not yet due is never passed.
+        var headDue = await db.Database.SqlQuery<bool>($"""
+            SELECT next_attempt_at <= now() AS "Value" FROM outbox_messages
+            WHERE processed_at IS NULL ORDER BY sequence LIMIT 1
+            """).ToListAsync(ct);
+        if (headDue is [false]) return false;
         var rows = await db.Set<OutboxMessage>().FromSql($"""
             SELECT * FROM outbox_messages
             WHERE processed_at IS NULL AND next_attempt_at <= now()
