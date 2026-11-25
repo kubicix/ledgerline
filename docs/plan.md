@@ -639,7 +639,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T05: System test harness
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 3 (System rows), section 4. **Depends:** M2-T19.
 **Files:** In `tests/Ledgerline.SystemTests/`: `Harness/ComposeStack.cs` (`UpAsync`, `StopAsync(service)`, `StartAsync(service)`, `KillAsync(service)` using `docker compose -p ledgerline-systest --profile app ...` through `System.Diagnostics.Process`; collects logs on failure), `Harness/KeycloakTokens.cs`, `Harness/LedgerlineClient.cs` (typed calls through the gateway), `Harness/Workloads.cs`, `Harness/SystemInvariants.cs` (trial balance zero through the admin API; sum of wallet balances equals completed top-ups minus nothing else; every payment final), `SmokeSystemTests.cs`. Tests are skipped unless environment variable `LEDGERLINE_SYSTEM_TESTS=1` (so `dotnet test --solution` stays fast).
