@@ -629,7 +629,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T04: Remaining integration failure tests
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` sections F1 to F5. **Depends:** M2 complete.
 **Files:** Create `tests/Ledgerline.ArchitectureTests/FailureTestInventoryTests.cs` with the list of every exact test name from `testing.md` F1 to F5 (integration rows) and one test `Every_documented_failure_test_exists` that reflects over the integration test assemblies (add project references) and fails for a missing name. Then add any test the inventory reports missing in its owning project.
