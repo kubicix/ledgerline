@@ -1,0 +1,15 @@
+{{- if not .Values.infraOnly }}
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    {{- include "ledgerline.labels" (dict "name" $name "root" $) | nindent 4 }}
+data:
+  {{- range $key, $value := $svc.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

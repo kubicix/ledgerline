@@ -1,0 +1,22 @@
+{{- /*
+A PodDisruptionBudget only protects something when a service has more than one replica; with one replica
+minAvailable 1 would block every node drain, so none is rendered.
+*/ -}}
+{{- if not .Values.infraOnly }}
+{{- range $name, $svc := .Values.services }}
+{{- if gt (int $svc.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ledgerline.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" $name "root" $) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -759,7 +759,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T03: Helm chart: generic service templates
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T01.
 **Files:** Create `deploy/helm/ledgerline/Chart.yaml`, `values.yaml` (map `services:` with entries `accounts`, `payments`, `risk`, `notifications`, `banksim`, `gateway`: image, replicas, port, env, `migrate: true|false`, `nodePort` for the gateway), `templates/_helpers.tpl`, `templates/service/{deployment.yaml,service.yaml,configmap.yaml,pdb.yaml}` (each a `range` over `.Values.services`), `templates/secrets.yaml`. Deployment: non-root security context, resource requests and limits, `startupProbe` (`/health/live`, 30 x 2 s), `livenessProbe` (`/health/live`), `readinessProbe` (`/health/ready`), `terminationGracePeriodSeconds: 30`, `preStop` sleep 5 s. Create `deploy/helm/ledgerline/tests/render_test.sh`.

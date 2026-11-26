@@ -1,0 +1,117 @@
+# Ledgerline chart values (ADR 0011). Everything here is a local development default that mirrors compose.yaml.
+# Passwords and keys below are development values, never reuse them. A real deployment would take them from an
+# external secret store instead of from this file.
+
+# Renders only the infrastructure and the Secrets (no service Deployments, Services, ConfigMaps, PodDisruptionBudgets
+# or migration Jobs). scripts/kind-deploy uses it for the first pass of a two-pass install (docs/kubernetes.md).
+infraOnly: false
+
+global:
+  imagePullPolicy: IfNotPresent   # images are tagged :local and loaded into the cluster with kind load
+  runAsUser: 1654                 # APP_UID of the Microsoft aspnet runtime images
+  terminationGracePeriodSeconds: 30
+  preStopSleepSeconds: 5          # counts inside terminationGracePeriodSeconds
+
+# One entry per deployable service. The map key is the Deployment, Service and Compose service name.
+#   image      image to run
+#   replicas   pod count
+#   port       container and Service port
+#   migrate    true when the service owns a database and has a migration Job
+#   nodePort   set only on the service exposed outside the cluster (makes its Service a NodePort)
+#   env        plain settings, rendered into the <service>-config ConfigMap
+#   secretEnv  settings with credentials, rendered into the <service>-secrets Secret
+services:
+  accounts:
+    image: ledgerline-accounts:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      ConnectionStrings__Redis: redis:6379
+      Auth__Mode: Oidc
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      ASPNETCORE_ENVIRONMENT: Development
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=accounts_db;Username=accounts;Password=accounts_dev;Maximum Pool Size=40
+      Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
+
+  payments:
+    image: ledgerline-payments:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      Bank__BaseUrl: http://banksim:8080
+      ConnectionStrings__Redis: redis:6379
+      Auth__Mode: Oidc
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      ASPNETCORE_ENVIRONMENT: Development
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=payments_db;Username=payments;Password=payments_dev;Maximum Pool Size=40
+      Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
+      Bank__ApiKey: ledgerline-bank-local-dev
+
+  risk:
+    image: ledgerline-risk:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      ConnectionStrings__Redis: redis:6379
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=risk_db;Username=risk;Password=risk_dev;Maximum Pool Size=40
+      Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
+
+  notifications:
+    image: ledgerline-notifications:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      ConnectionStrings__Redis: redis:6379
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      Smtp__Host: mailpit
+      Smtp__Port: "1025"
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=notifications_db;Username=notifications;Password=notifications_dev;Maximum Pool Size=40
+      Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
+
+  banksim:
+    image: ledgerline-banksim:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=banksim_db;Username=banksim;Password=banksim_dev;Maximum Pool Size=40
+      Bank__ApiKey: ledgerline-bank-local-dev
+
+  gateway:
+    image: ledgerline-gateway:local
+    replicas: 1
+    port: 8080
+    migrate: false
+    nodePort: 30080
+    env:
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    secretEnv: {}
