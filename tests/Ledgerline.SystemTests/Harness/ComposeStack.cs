@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using Ledgerline.Testing;
 
 namespace Ledgerline.SystemTests.Harness;
 
@@ -109,8 +110,19 @@ public sealed class ComposeStack : IAsyncDisposable
     public Task StartAsync(string service, CancellationToken ct = default) =>
         RunCheckedAsync(["start", "--wait", "--wait-timeout", "300", service], ct);
 
-    /// <summary><c>docker compose kill -s KILL service</c>: the process dies without any shutdown code.</summary>
-    public Task KillAsync(string service, CancellationToken ct = default) => RunCheckedAsync(["kill", "-s", "KILL", service], ct);
+    /// <summary>
+    /// <c>docker compose kill -s KILL service</c>: the process dies without any shutdown code. Returns only once Docker no
+    /// longer lists a running container of the service (up to 30 s, else throws), so a following <see cref="StartAsync"/>
+    /// does not see a container that is still marked running and skip it.
+    /// </summary>
+    public async Task KillAsync(string service, CancellationToken ct = default)
+    {
+        await RunCheckedAsync(["kill", "-s", "KILL", service], ct);
+        await Eventually.ShouldAsync(
+            async () => (await ComposeAsync(["ps", "--status", "running", "-q", service], CommandTimeout, ct)).StandardOutput.Trim().Length == 0,
+            TimeSpan.FromSeconds(30),
+            $"A container of service {service} was still running after docker compose kill.");
+    }
 
     /// <summary>
     /// <c>docker compose exec -T service command</c>: runs a command inside a running service container and returns its
