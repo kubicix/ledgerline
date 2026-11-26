@@ -3,7 +3,7 @@ WORKDIR /source
 COPY . .
 RUN dotnet publish src/Services/Notifications/Ledgerline.Notifications/Ledgerline.Notifications.csproj -c Release -o /publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:11.0
 WORKDIR /app
 COPY --from=build /publish .
 USER $APP_UID
