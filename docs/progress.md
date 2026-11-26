@@ -1,6 +1,6 @@
 # Ledgerline progress and agent handoff
 
-Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline.
+Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline (public).
 
 ## Checkpoint
 
@@ -59,10 +59,12 @@ not implemented by M3.
   images; no vulnerable packages across 25 projects.
 - Hosted CI on the merge commit 142f201 (push to main): `build-test`, `security`,
   `images` and `system-tests` passed.
-- Hosted CI, red: `codeql` fails at the analyze step because code scanning is not
-  enabled on the private repository. On pull requests the `security` job fails at
-  its last step, dependency review, with `Forbidden` for the same reason; the scans
-  before it run. Both stay red on every pull request until the owner decides.
+- Hosted CI, red while the repository was private: `codeql` failed at the analyze
+  step because code scanning was not enabled, and on pull requests the `security`
+  job failed at its last step, dependency review, with `Forbidden` for the same
+  reason; the scans before it ran. The repository was made public on 2026-11-26
+  after a full-history gitleaks scan with no findings. Whether both jobs are green
+  now is not verified until the next run on main and on a pull request.
 - Hosted CI, not yet verified: `k6-smoke` runs only on the nightly schedule
   (02:17 UTC) and no scheduled run has happened yet. README badges were not checked.
 - Dependabot is active: it opened pull requests #4 to #20 on 2026-11-26. Sixteen
@@ -85,10 +87,11 @@ without deleting their data.
 ## Continuation instructions
 
 1. Open owner decisions before or alongside M4 (see also the open items in
-   [M3 decisions](m3-decisions.md)): make the repository public or condition the
-   CodeQL and dependency review steps; close the major Dependabot pull requests and
-   add a major-version ignore to `.github/dependabot.yml`, or accept them; check the
-   first nightly `k6-smoke` result.
+   [M3 decisions](m3-decisions.md)): confirm that `codeql` and dependency review
+   pass now that the repository is public; close the major Dependabot pull requests
+   and add a major-version ignore to `.github/dependabot.yml`, or accept them; check
+   the first nightly `k6-smoke` result; decide on a LICENSE file and on enabling
+   secret scanning with push protection.
 2. Then start at M4-T01. Read [ADR 0011](adr/0011-kubernetes-packaging.md) and the
    next task's spec in [the plan](plan.md). Create the next branch from updated main.
    `kind` and `helm` are not installed on the development machine yet; `kubectl` is.
