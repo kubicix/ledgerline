@@ -740,7 +740,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T01: Tooling and kind cluster definition
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011, ADR 0000. **Depends:** M3 complete.
 **Files:** Create `deploy/kind/cluster.yaml` (one control-plane node, `extraPortMappings` container port 30080 to host 8080, 30300 to host 3000, 30025 to host 8025), `scripts/kind-up.sh` and `.ps1` (create cluster `ledgerline` if absent), `scripts/kind-down.sh` and `.ps1`, `docs/kubernetes.md` (install instructions for kind v0.33.0 and Helm v4.3.2 on Windows, macOS, Linux; re-verify both versions first).
