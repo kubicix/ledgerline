@@ -57,6 +57,14 @@ public sealed class FailureSystemTests(ComposeStack stack) : IAsyncDisposable
 
         await SystemInvariants.AssertAsync(client, run, SettleTimeout, ct);
         await AssertEveryRunPaymentCompletedAsync(run, since, ct);
+        // The symmetric workload hides a lost or doubled posting from the balance checks, so count the entries directly.
+        foreach (var kind in new[] { "TopUp", "Transfer" })
+        {
+            var ids = run.Operations.Where(x => x.Kind == kind).Select(x => x.Id).ToArray();
+            var entries = await SystemQueries.JournalEntriesAsync(kind, ids, ct);
+            entries.Count.ShouldBe(ids.Length, $"Every completed {kind} has a journal entry.");
+            entries.Values.ShouldAllBe(x => x == 1, $"No {kind} is posted twice.");
+        }
         var deltas = await run.WalletDeltasAsync(client, ct);
         // 25 transfers of the same amount each way: each wallet gains its funding plus its own 25 top-ups.
         deltas[alice.AccountId].ShouldBe(Funding + 25 * Amount);
