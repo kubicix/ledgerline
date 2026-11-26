@@ -716,7 +716,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T13: README for M3
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M3-T10, M3-T12.
 **Files:** Modify `README.md`: "Failure scenarios" section with a table (scenario, test name, level, link to the test file), CI badges, "Security scans" section listing the four scans and what each covers.

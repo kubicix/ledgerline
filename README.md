@@ -1,5 +1,8 @@
 # Ledgerline
 
+[![ci](https://github.com/kubicix/ledgerline/actions/workflows/ci.yml/badge.svg)](https://github.com/kubicix/ledgerline/actions/workflows/ci.yml)
+[![codeql](https://github.com/kubicix/ledgerline/actions/workflows/codeql.yml/badge.svg)](https://github.com/kubicix/ledgerline/actions/workflows/codeql.yml)
+
 A payment and wallet backend built as .NET 10 microservices. An event-sourced
 double-entry ledger, payment sagas with bank compensation, Risk and email services
 communicate through RabbitMQ with a transactional outbox and inbox.
@@ -152,16 +155,40 @@ Payment flows: [docs/specs/payments.md](docs/specs/payments.md).
 
 ## Failure scenarios
 
-_Placeholder: filled in M3-T13 with links to the test files._
+Each scenario has deterministic integration tests that run on every push. The first
+three also have a system test that kills real containers; system tests run on `main`
+and nightly, and locally with `LEDGERLINE_SYSTEM_TESTS=1`. Tests that move money end
+with the ledger invariant check (trial balance zero in every currency). Steps and assertions
+per test: [docs/testing.md](docs/testing.md).
 
-| Scenario | Claim | Test | Level | Result |
-|---|---|---|---|---|
-| Broker down | Requests are accepted, nothing is lost, everything completes after recovery | TBD | integration, system | TBD |
-| Service crashes mid-flow | No lost or duplicated money; the flow finishes after restart | TBD | integration, system | TBD |
-| Message delivered twice | No second effect | TBD | integration, system | TBD |
-| Concurrent transfers on one account | No overdraft, no deadlock | TBD | integration | TBD |
+| Scenario | Test | Level | File |
+|---|---|---|---|
+| Broker down: outbox keeps messages and delivers once after recovery | `Outbox_keeps_messages_while_broker_is_down_and_delivers_after_recovery` | integration | [FailureScenarioTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs) |
+| Broker down: top-ups accepted during the outage complete afterwards | `Topups_accepted_during_broker_outage_complete_after_recovery` | integration | [TimeoutTests.cs](tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs) |
+| Broker down: RabbitMQ stopped under 50 top-ups and 50 transfers | `Broker_outage_loses_no_money` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Crash after ledger commit, before ack | `Crash_after_ledger_commit_before_ack_does_not_double_post` | integration | [CrashTests.cs](tests/Ledgerline.Accounts.IntegrationTests/CrashTests.cs) |
+| Crash after saga transition commit | `Crash_after_saga_transition_commit_resumes_from_outbox` | integration | [CrashTests.cs](tests/Ledgerline.Payments.IntegrationTests/CrashTests.cs) |
+| Crash after bank capture, before commit | `Crash_after_bank_capture_before_commit_does_not_capture_twice` | integration | [BankCallTests.cs](tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs) |
+| Crash after publish, before the outbox row is marked processed | `Crash_after_publish_before_marking_processed_republishes_and_consumer_deduplicates` | integration | [FailureScenarioTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs) |
+| Payments killed with 100 top-ups in flight | `Killing_payments_mid_saga_completes_after_restart` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Accounts killed during 200 transfers | `Killing_accounts_mid_posting_completes_after_restart` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Same message delivered twice | `Same_message_delivered_twice_is_handled_once` | integration | [ConsumerTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/ConsumerTests.cs) |
+| Same message delivered to two consumers at once | `Same_message_delivered_concurrently_to_two_consumers_is_handled_once` | integration | [ConsumerTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/ConsumerTests.cs) |
+| Same operation with a new message id | `Same_operation_with_new_message_id_returns_same_reply_without_second_entry` | integration | [LedgerCommandTests.cs](tests/Ledgerline.Accounts.IntegrationTests/LedgerCommandTests.cs) |
+| Duplicate and late saga replies | `Duplicate_and_late_replies_do_not_move_a_final_payment` | integration | [TransferFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TransferFlowTests.cs) |
+| Every message replayed during a mixed workload | `Replaying_every_message_changes_nothing` | system | [ReplaySystemTests.cs](tests/Ledgerline.SystemTests/ReplaySystemTests.cs) |
+| 50 concurrent debits on one account | `Concurrent_debits_never_overdraw` | integration | [ConcurrencyTests.cs](tests/Ledgerline.Accounts.IntegrationTests/ConcurrencyTests.cs) |
+| Opposite-direction transfers | `Opposite_direction_transfers_do_not_deadlock` | integration | [ConcurrencyTests.cs](tests/Ledgerline.Accounts.IntegrationTests/ConcurrencyTests.cs) |
+| Concurrent capture and void of one payment | `Capture_and_void_race_has_exactly_one_winner` | integration | [MerchantPaymentFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/MerchantPaymentFlowTests.cs) |
+| Same idempotency key sent concurrently | `Same_idempotency_key_sent_concurrently_creates_one_payment` | integration | [PaymentsApiTests.cs](tests/Ledgerline.Payments.IntegrationTests/PaymentsApiTests.cs) |
+| Poison message | `Poison_message_goes_to_dead_queue_after_max_attempts` | integration | [RetryAndDeadLetterTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/RetryAndDeadLetterTests.cs) |
+| Bank times out after succeeding | `Bank_timeout_with_success_is_resolved_by_lookup` | integration | [BankCallTests.cs](tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs) |
+| Ledger rejects after the bank captured | `Ledger_rejection_after_bank_capture_refunds_at_bank` | integration | [TopUpFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs) |
+| Compensation exhausted | `Exhausted_compensation_ends_in_manual_review` | integration | [TopUpFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs) |
 
-How the tests work: [docs/testing.md](docs/testing.md).
+The table lists the main tests per scenario; the full list is in
+[docs/testing.md](docs/testing.md). Load results, including the misses, are under
+[Measurements](#measurements).
 
 ## Measurements
 
@@ -221,8 +248,19 @@ _Placeholder: filled in M6-T06._
 
 ## Security scans in CI
 
-_Placeholder: filled in M3-T13 (dependency review, vulnerable packages, secret scan,
-static analysis, image scan)._
+The `security` and `images` jobs in [ci.yml](.github/workflows/ci.yml) and the
+[codeql.yml](.github/workflows/codeql.yml) workflow run these scans:
+
+| Scan | Covers | Runs |
+|---|---|---|
+| Dependency review (`actions/dependency-review-action`) | Dependencies added or changed in a pull request: known vulnerabilities and licenses | Pull requests |
+| Vulnerable NuGet packages (`dotnet list package --vulnerable --include-transitive`) | Direct and transitive packages of the whole solution; any hit fails the job | Push to `main`, pull requests, nightly |
+| Secret scan (gitleaks, [.gitleaks.toml](.gitleaks.toml)) | Committed secrets across the full git history | Push to `main`, pull requests, nightly |
+| Static analysis (CodeQL, C#) | Code-level vulnerabilities in the source, using a manual build | Push to `main`, pull requests |
+| Image scan (Trivy) | Fixed HIGH and CRITICAL vulnerabilities in the six service images | Push to `main` |
+
+On a private repository, dependency review and the CodeQL result upload need GitHub
+Advanced Security. The scans are meant to run unchanged once the repository is public.
 
 ## When would I build this as a monolith?
 
