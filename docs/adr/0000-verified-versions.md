@@ -75,6 +75,7 @@ Considered and not used:
 | axllent/mailpit | v1.33.1 | Fake SMTP with a web UI |
 | apache/kafka | 4.4.0 | Phase 2. KRaft mode, no ZooKeeper |
 | mongo | 9.0 (9.0.8) | Phase 2. Re-verify at M5; 8.0 is the fallback |
+| zricethezav/gitleaks | v8.30.1 | Secret scan for local runs. Docker Hub tag checked 2026-11-26; the README also names `ghcr.io/gitleaks/gitleaks` |
 | grafana/k6 | 2.4.0 | Load tests. Pulled on 2026-11-25: digest `sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276`, `k6 version` prints `k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)`. Script API checked for M3-T08, see below |
 
 ## Tools and GitHub Actions
@@ -87,13 +88,14 @@ Considered and not used:
 | actions/checkout | v7 |
 | actions/setup-dotnet | v6 |
 | actions/upload-artifact | v7 |
-| actions/dependency-review-action | v5 |
-| gitleaks/gitleaks-action | v3 |
+| actions/dependency-review-action | v5. Re-checked 2026-11-26: latest release v5.0.1; `v5` is a branch, not a tag. Private repositories need GitHub Advanced Security (README) |
+| gitleaks/gitleaks-action | v3. Re-checked 2026-11-26: tag `v3` (v3.0.0, Node 24). No license key needed for personal-account repositories, required for organizations (README). CI pins the CLI with `GITLEAKS_VERSION: 8.30.1`. On pull requests it calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits` (v3 `src/gitleaks.js`; the README lists no permissions), so the job grants `pull-requests: read` |
 | aquasecurity/trivy-action | v0.36.0 |
 | helm/kind-action | v1.15.2 |
 | azure/setup-helm | v5 |
 | grafana/setup-k6-action | v1 |
-| github/codeql-action | Major version **not verified** (the releases API returns bundle tags). Check the action README at M3 |
+| github/codeql-action | v4. Verified 2026-11-26: tag `refs/tags/v4` exists; newest tag v4.39.5 (GitHub tags API) |
+| gitleaks CLI | v8.30.1. Latest release (GitHub releases API, 2026-11-26) |
 
 ## Specifications
 
@@ -139,9 +141,6 @@ for `k6/http` `setResponseCallback` and `expectedStatuses`, thresholds, `k6/metr
 - Hangfire license text and which features are paid.
 - Whether Wolverine 6.x requires the separate `WolverineFx.RuntimeCompilation` package
   (seen only in a third-party pull request). Not relevant since Wolverine is not used.
-- `github/codeql-action` current major version.
-- Whether the gitleaks GitHub Action needs a license key for this repository type
-  (historically required for organizations, free for personal accounts).
 - Bitnami chart and image availability. Bitnami changed its free catalog in 2025; this
   project avoids Bitnami for that reason (ADR 0011), and the current terms were not
   re-checked.

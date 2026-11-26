@@ -1,0 +1,31 @@
+# Gitleaks configuration. Extends the built-in rules and allowlists only the
+# documented local development passwords, by path and exact value.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local development database, broker and Keycloak admin passwords in Compose files"
+condition = "AND"
+paths = [
+  '''^compose\.yaml$''',
+  '''^deploy/compose/''',
+]
+regexes = [
+  '''^accounts_dev$''',
+  '''^payments_dev$''',
+  '''^risk_dev$''',
+  '''^notifications_dev$''',
+  '''^banksim_dev$''',
+  '''^ledgerline_dev$''',
+]
+
+[[allowlists]]
+description = "Local development user passwords in the Keycloak realm file (every password is <username>_dev)"
+condition = "AND"
+paths = [
+  '''^deploy/compose/keycloak/ledgerline-realm\.json$''',
+]
+regexes = [
+  '''^(alice|bob|shop|admin|load-customer-\d{3}|load-merchant-\d{2})_dev$''',
+]

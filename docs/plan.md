@@ -697,7 +697,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T11: CI security scans
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 4; ADR 0000 (action versions; verify `github/codeql-action` major). **Depends:** none.
 **Files:** Modify `.github/workflows/ci.yml` (job `security`: `actions/dependency-review-action@v5` on pull requests; step `dotnet list Ledgerline.slnx package --vulnerable --include-transitive` failing when the output contains `has the following vulnerable packages`; `gitleaks/gitleaks-action@v3`); create `.github/workflows/codeql.yml` (C#, manual build mode with `dotnet build`), `.github/dependabot.yml` (nuget, github-actions, docker; weekly), `.gitleaks.toml` (allowlist the documented development passwords in `compose.yaml`, `deploy/compose/**`, and the realm file by path and exact value; nothing broader).

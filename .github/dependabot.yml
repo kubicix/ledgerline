@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories:
+      - /src/Gateway/Ledgerline.Gateway
+      - /src/Services/Accounts/Ledgerline.Accounts
+      - /src/Services/BankSimulator/Ledgerline.BankSimulator
+      - /src/Services/Notifications/Ledgerline.Notifications
+      - /src/Services/Payments/Ledgerline.Payments
+      - /src/Services/Risk/Ledgerline.Risk
+    schedule:
+      interval: weekly
