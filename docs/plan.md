@@ -725,14 +725,14 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ## Milestone 3 checklist
 
-- [ ] Broker down: integration and system tests pass (M1-T11, M2-T17, M3-T06). **DoD: failure test 1**
-- [ ] Service crashes: integration and system tests pass (M1-T23, M2-T12, M3-T06). **DoD: failure test 2**
-- [ ] Message delivered twice: integration and system tests pass (M1-T08, M1-T16, M3-T07). **DoD: failure test 3**
-- [ ] Documented failure test inventory is enforced (M3-T04).
-- [ ] OpenTelemetry traces across services and a dashboard screenshot in the README (M3-T01, M3-T03, M3-T10). **DoD: traces and dashboard screenshot**
-- [ ] k6 results in the README with hardware and misses stated (M3-T10). **DoD: k6 results**
-- [ ] Tests and four security scans run in CI (M3-T11, M3-T12). **DoD: tests and security scans in CI**
-- [ ] `when-monolith.md` has measured numbers (M3-T10). **DoD: when monolith section**
+- [x] Broker down: integration and system tests pass (M1-T11, M2-T17, M3-T06). **DoD: failure test 1**
+- [x] Service crashes: integration and system tests pass (M1-T23, M2-T12, M3-T06). **DoD: failure test 2**
+- [x] Message delivered twice: integration and system tests pass (M1-T08, M1-T16, M3-T07). **DoD: failure test 3**
+- [x] Documented failure test inventory is enforced (M3-T04).
+- [x] OpenTelemetry traces across services and a dashboard screenshot in the README (M3-T01, M3-T03, M3-T10). **DoD: traces and dashboard screenshot**
+- [x] k6 results in the README with hardware and misses stated (M3-T10). **DoD: k6 results**
+- [x] Tests and four security scans run in CI (M3-T11, M3-T12). **DoD: tests and security scans in CI**
+- [x] `when-monolith.md` has measured numbers (M3-T10). **DoD: when monolith section**
 
 ---
 
