@@ -6,9 +6,8 @@ Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline.
 
 - M1: complete and merged through [PR #1](https://github.com/kubicix/ledgerline/pull/1).
 - M2: complete and merged through [PR #2](https://github.com/kubicix/ledgerline/pull/2).
-- M3: all 13 tasks plus the whole-branch review and audit fixes are verified on
-  branch `milestone-3` (BASE 1e19932). Nothing is pushed or merged; the owner
-  pushes and opens the PR.
+- M3: complete and merged through [PR #3](https://github.com/kubicix/ledgerline/pull/3)
+  (merge commit 142f201, BASE 1e19932).
 - M4 and later milestones: not started.
 - Overall: 57 of 82 planned tasks, approximately 70%. Counting basis: `docs/plan.md`
   has 83 Done boxes, including the optional M6-T07 Angular admin panel; 82 excludes
@@ -26,7 +25,8 @@ Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline.
 - [x] One fresh whole-branch review and regression-tested Important fixes.
 - Integration record: [PR #2 checks and merge](https://github.com/kubicix/ledgerline/pull/2).
 - [x] M3: tracing, metrics, failure/load verification and CI expansion.
-- Integration record for M3: open until the owner pushes `milestone-3` and CI runs.
+- Integration record for M3: [PR #3 checks and merge](https://github.com/kubicix/ledgerline/pull/3).
+  Hosted results are under Verification evidence.
 - [ ] M4: Kubernetes/Helm.
 - [ ] M5: reporting, event streaming and reconciliation.
 - [ ] M6: Blazor UI.
@@ -57,8 +57,18 @@ not implemented by M3.
 - gitleaks 8.30.1 clean (git history and worktree, positive control flagged);
   Trivy 0.70.0 clean for HIGH and CRITICAL with a fix available on all 6 service
   images; no vulnerable packages across 25 projects.
-- Not verifiable until the push: the `security`, `codeql`, `images`, `system-tests`
-  and `k6-smoke` workflows, README badges, Dependabot and dependency review.
+- Hosted CI on the merge commit 142f201 (push to main): `build-test`, `security`,
+  `images` and `system-tests` passed.
+- Hosted CI, red: `codeql` fails at the analyze step because code scanning is not
+  enabled on the private repository. On pull requests the `security` job fails at
+  its last step, dependency review, with `Forbidden` for the same reason; the scans
+  before it run. Both stay red on every pull request until the owner decides.
+- Hosted CI, not yet verified: `k6-smoke` runs only on the nightly schedule
+  (02:17 UTC) and no scheduled run has happened yet. README badges were not checked.
+- Dependabot is active: it opened pull requests #4 to #20 on 2026-11-26. Sixteen
+  are major bumps (.NET 11 images, `Microsoft.Extensions.*` 11, Npgsql 11) that
+  conflict with the net10.0 and 10.0.x rule. #20 (Npgsql EF Core provider 10.0.4)
+  is the only one on the 10.0 line, and its `build-test` is red. None is merged.
 
 ```powershell
 dotnet build Ledgerline.slnx -c Release
@@ -74,11 +84,14 @@ without deleting their data.
 
 ## Continuation instructions
 
-1. The owner pushes `milestone-3`, opens the PR and checks CI first. Do not start
-   M4 before that result is known (see the open items in [M3 decisions](m3-decisions.md);
-   dependency review and CodeQL upload may be red on a private repository).
+1. Open owner decisions before or alongside M4 (see also the open items in
+   [M3 decisions](m3-decisions.md)): make the repository public or condition the
+   CodeQL and dependency review steps; close the major Dependabot pull requests and
+   add a major-version ignore to `.github/dependabot.yml`, or accept them; check the
+   first nightly `k6-smoke` result.
 2. Then start at M4-T01. Read [ADR 0011](adr/0011-kubernetes-packaging.md) and the
    next task's spec in [the plan](plan.md). Create the next branch from updated main.
+   `kind` and `helm` are not installed on the development machine yet; `kubectl` is.
 3. Use one fresh named Compose project at a time and stop only that project. Never
    run `down -v`; preserve existing volumes. The system-test harness uses its own
    `ledgerline-systest` project and refuses another Ledgerline project, so stop the
@@ -86,8 +99,9 @@ without deleting their data.
 4. Avoid building shared output DLLs while test processes use them on Windows. Run
    full integration modules serially (`--max-parallel-test-modules 1`). The full
    suite takes about 11 minutes; run focused tests unless the full suite is required.
-5. Preserve the user-owned `orchestrator-prompt.md` and `docs/plan-M3-HANDOFF.md`
-   (untracked) and the ignored `.superpowers/` ledger. Stage files by name.
+5. The user-owned `orchestrator-prompt.md` and `docs/plan-M3-HANDOFF.md` are tracked
+   on main since 3564d0a; do not edit or delete them. The `.superpowers/` ledger
+   stays out of every commit. Stage files by name.
 6. Do not repeat completed tasks or dispatch another M3 reviewer. Deferred items are
    in [M3 decisions](m3-decisions.md).
 
