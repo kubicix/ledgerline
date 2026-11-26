@@ -707,7 +707,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T12: CI image scan, system tests, k6 smoke; remove the zero-test exemption
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 4. **Depends:** M3-T06, M3-T08, M3-T11.
 **Files:** Modify `.github/workflows/ci.yml`: job `images` (main only: `docker compose --profile app build`, `aquasecurity/trivy-action@v0.36.0` per image, `severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`); job `system-tests` (main and `schedule` nightly: `LEDGERLINE_SYSTEM_TESTS=1`, upload `docker compose logs` as an artifact on failure); job `k6-smoke` (nightly). Modify `tests/Directory.Build.props`: remove the `--ignore-exit-code 8` line; delete or fill any test project that still has zero tests.

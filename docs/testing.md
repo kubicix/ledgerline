@@ -126,9 +126,9 @@ Workflow `.github/workflows/ci.yml` (exists, grows per milestone):
 | `build-test` | push, pull request | restore, build (warnings as errors), unit, architecture, integration tests | 10 min |
 | `compose-validate` | push, pull request | `docker compose config`, Helm lint and template (from M4) | 1 min |
 | `security` (M3) | push, pull request | Dependency review, `dotnet list package --vulnerable --include-transitive`, gitleaks, CodeQL (C#) | 8 min |
-| `images` (M3) | main | Build service images, Trivy scan, fail on HIGH or CRITICAL with a fix available | 10 min |
-| `system-tests` (M3) | main, nightly | `docker compose --profile app up --build -d`, run `Ledgerline.SystemTests`, upload container logs on failure | 20 min |
-| `k6-smoke` (M3) | nightly | 60 s smoke scenario with thresholds; upload summary JSON | 5 min |
+| `images` (M3) | main | Build service images, Trivy scan, fail on HIGH or CRITICAL with a fix available | 10 min target; job timeout 15 min is the ceiling |
+| `system-tests` (M3) | main, nightly | Run `Ledgerline.SystemTests` with `LEDGERLINE_SYSTEM_TESTS=1`; the harness starts its own Compose project `ledgerline-systest` (`up --build --wait`), and `LEDGERLINE_SYSTEM_TESTS_KEEP=1` keeps it up so container logs can be uploaded on failure | 20 min target; job timeout 30 min is the ceiling |
+| `k6-smoke` (M3) | nightly | 60 s smoke scenario with thresholds; upload summary JSON | 5 min target; job timeout 30 min is the ceiling |
 | `kind` (M4) | main | kind cluster, Helm install, readiness, smoke, pod-delete test | 15 min |
 
 Integration tests run on `ubuntu-latest`, which provides Docker for Testcontainers.

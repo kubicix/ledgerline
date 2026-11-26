@@ -77,6 +77,7 @@ Considered and not used:
 | mongo | 9.0 (9.0.8) | Phase 2. Re-verify at M5; 8.0 is the fallback |
 | zricethezav/gitleaks | v8.30.1 | Secret scan for local runs. Docker Hub tag checked 2026-11-26; the README also names `ghcr.io/gitleaks/gitleaks` |
 | grafana/k6 | 2.4.0 | Load tests. Pulled on 2026-11-25: digest `sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276`, `k6 version` prints `k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)`. Script API checked for M3-T08, see below |
+| aquasec/trivy | 0.70.0 | Local image scan, same Trivy version as the CI action default. Docker Hub tag checked 2026-11-26 (no `v` prefix); pulled digest `sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e`. Used instead of `:latest` |
 
 ## Tools and GitHub Actions
 
@@ -90,7 +91,7 @@ Considered and not used:
 | actions/upload-artifact | v7 |
 | actions/dependency-review-action | v5. Re-checked 2026-11-26: latest release v5.0.1; `v5` is a branch, not a tag. Private repositories need GitHub Advanced Security (README) |
 | gitleaks/gitleaks-action | v3. Re-checked 2026-11-26: tag `v3` (v3.0.0, Node 24). No license key needed for personal-account repositories, required for organizations (README). CI pins the CLI with `GITLEAKS_VERSION: 8.30.1`. On pull requests it calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits` (v3 `src/gitleaks.js`; the README lists no permissions), so the job grants `pull-requests: read` |
-| aquasecurity/trivy-action | v0.36.0 |
+| aquasecurity/trivy-action | v0.36.0. Verified 2026-11-26: tag `refs/tags/v0.36.0` exists and is the latest release (2026-04-22, GitHub releases API). Its `action.yaml` defaults the Trivy CLI to `v0.70.0` (installed through `aquasecurity/setup-trivy` v0.2.6, pinned by hash); CI passes `version: v0.70.0` explicitly. The newest Trivy release is v0.76.2 (2026-11-05); CI stays on the action default |
 | helm/kind-action | v1.15.2 |
 | azure/setup-helm | v5 |
 | grafana/setup-k6-action | v1 |
