@@ -769,7 +769,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T04: Helm chart: migration jobs
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011; `design.md` section 11. **Depends:** M4-T03.
 **Files:** Create `templates/service/migrate-job.yaml` (hook `pre-install,pre-upgrade`, weight after infrastructure, `backoffLimit: 6`, `hook-delete-policy: before-hook-creation,hook-succeeded`, args `["migrate"]`, an init container that waits for PostgreSQL with `pg_isready`). Extend `render_test.sh`.

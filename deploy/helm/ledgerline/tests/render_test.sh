@@ -128,7 +128,7 @@ for f in "$WORK"/default/doc*.yaml; do
   else
     grep -q 'type: ClusterIP' "$f" || fail "Service $n must be ClusterIP"
   fi
-  grep -q 'port: 8080' "$f" || fail "Service $n must expose port 8080"
+  grep -Eq '^ *port: 8080$' "$f" || fail "Service $n must expose port 8080"
 done
 [ "$NODEPORTS" -eq 1 ] || fail "expected exactly 1 NodePort Service, found $NODEPORTS"
 
@@ -187,6 +187,64 @@ else
   fail "helm template with payments replicas=2 failed"
 fi
 
+
+# ---- Migration Jobs (M4-T04, section 0.1 C1) -------------------------------------------------------
+MIGRATE_SERVICES="accounts payments risk notifications banksim"
+JOB_COUNT="$(grep -c '^Job ' "$WORK/default.list")"
+[ "$JOB_COUNT" -eq 5 ] || fail "expected 5 migration Jobs, found $JOB_COUNT"
+for svc in $MIGRATE_SERVICES; do
+  check "Job $svc-migrate is rendered" grep -qx "Job $svc-migrate" "$WORK/default.list"
+done
+grep -q '^Job gateway' "$WORK/default.list" && fail "the gateway must not have a migration Job"
+for f in "$WORK"/default/doc*.yaml; do
+  [ "$(doc_kind "$f")" = "Job" ] || continue
+  j="$(doc_name "$f")"
+  svc="${j%-migrate}"
+  grep -Eq '"?helm.sh/hook"?: "?pre-install,pre-upgrade"?$' "$f" || fail "$j: hook must be pre-install,pre-upgrade"
+  grep -Eq '"?helm.sh/hook-delete-policy"?: "?before-hook-creation,hook-succeeded"?$' "$f" \
+    || fail "$j: hook-delete-policy must be before-hook-creation,hook-succeeded"
+  grep -Eq '"?helm.sh/hook-weight"?: "?-?[0-9]+"?$' "$f" || fail "$j: hook-weight must be stated"
+  grep -q '^  backoffLimit: 6$' "$f" || fail "$j: backoffLimit must be 6"
+  grep -q 'restartPolicy: Never$' "$f" || fail "$j: restartPolicy must be Never"
+  grep -Eq 'image: "?ledgerline-'"$svc"':local"?$' "$f" || fail "$j: image must be ledgerline-$svc:local"
+  grep -q 'args: \["migrate"\]$' "$f" || fail "$j: args must be [\"migrate\"]"
+  # Pod labels must not match the Service selector of <svc>, or the Service would route traffic to the Job pod.
+  grep -Eq "^ *app.kubernetes.io/name: $svc\$" "$f" && fail "$j: pod labels must not match the $svc Service selector"
+  grep -Eq "^ *app.kubernetes.io/name: $j\$" "$f" || fail "$j: labels must name $j"
+
+  init="$(block "$f" initContainers)"
+  [ -n "$init" ] || fail "$j: no initContainers"
+  grep -Eq 'image: "?postgres:18.7-alpine"?$' <<<"$init" || fail "$j: init container must use postgres:18.7-alpine"
+  grep -q 'pg_isready' <<<"$init" || fail "$j: init container must wait with pg_isready"
+  # Without -U, pg_isready as a uid with no passwd entry reports "no attempt" forever.
+  grep -Eq 'pg_isready .*-U [a-z]+' <<<"$init" || fail "$j: pg_isready needs -U"
+  grep -Eq 'pg_isready .*-h "?postgres"? .*-p "?5432"?' <<<"$init" || fail "$j: pg_isready must target postgres:5432"
+
+  grep -q 'runAsNonRoot: true' "$f" || fail "$j: runAsNonRoot must be true"
+  grep -Eq 'runAsUser: [1-9][0-9]*' "$f" || fail "$j: runAsUser must be a non-zero uid"
+  [ "$(grep -c 'allowPrivilegeEscalation: false' "$f")" -eq 2 ] || fail "$j: both containers need allowPrivilegeEscalation false"
+  [ "$(grep -c -- '- ALL' "$f")" -eq 2 ] || fail "$j: both containers must drop ALL capabilities"
+  [ "$(grep -c '^ *limits:' "$f")" -eq 2 ] || fail "$j: both containers need resource limits"
+  [ "$(grep -c '^ *requests:' "$f")" -eq 2 ] || fail "$j: both containers need resource requests"
+
+  # Same database settings as the compose <svc>-migrate job, read from the Secret.
+  env="$(block "$f" env)"
+  grep -q 'name: ConnectionStrings__Database' <<<"$env" || fail "$j: ConnectionStrings__Database env missing"
+  grep -q "name: $svc-secrets" <<<"$env" || fail "$j: ConnectionStrings__Database must come from $svc-secrets"
+  grep -q 'key: ConnectionStrings__Database' <<<"$env" || fail "$j: secretKeyRef key must be ConnectionStrings__Database"
+done
+
+# The Job list follows services.<name>.migrate, not a fixed list.
+if helm_render "$WORK/nomig.yaml" --set services.risk.migrate=false; then
+  split_docs "$WORK/nomig.yaml" "$WORK/nomig"
+  list_docs "$WORK/nomig" >"$WORK/nomig.list"
+  [ "$(grep -c '^Job ' "$WORK/nomig.list")" -eq 4 ] || fail "risk.migrate=false: expected 4 migration Jobs"
+  grep -qx 'Job risk-migrate' "$WORK/nomig.list" && fail "risk.migrate=false: Job risk-migrate must not render"
+else
+  cat "$WORK/nomig.yaml.err" >&2
+  fail "helm template with services.risk.migrate=false failed"
+fi
+
 # ---- Two-pass deploy switch (section 0.1 C1): infrastructure only ------------------------------
 if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
   split_docs "$WORK/infra.yaml" "$WORK/infra"
@@ -195,7 +253,6 @@ if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
     grep -qx "Deployment $svc" "$WORK/infra.list" && fail "infraOnly: Deployment $svc must not render"
     grep -qx "Service $svc" "$WORK/infra.list" && fail "infraOnly: Service $svc must not render"
     grep -qx "PodDisruptionBudget $svc" "$WORK/infra.list" && fail "infraOnly: PodDisruptionBudget $svc must not render"
-    grep -qx "Job $svc-migrate" "$WORK/infra.list" && fail "infraOnly: migration Job $svc must not render"
   done
   grep -q '^Job ' "$WORK/infra.list" && fail "infraOnly: no Job may render"
   for svc in accounts payments risk notifications banksim; do
@@ -209,13 +266,18 @@ if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
     *-config*-secrets*) ;;
     *) fail "reference extractor self-check failed (got: $self)" ;;
   esac
+  JOBS_CHECKED=0
   for f in "$WORK"/default/doc*.yaml; do
     [ "$(doc_kind "$f")" = "Job" ] || continue
     j="$(doc_name "$f")"
-    for ref in $(referenced_names "$f"); do
+    JOBS_CHECKED=$((JOBS_CHECKED + 1))
+    refs="$(referenced_names "$f")"
+    [ -n "$refs" ] || fail "reference extractor found nothing in migration Job $j"
+    for ref in $refs; do
       grep -Eqx "(Secret|ConfigMap) $ref" "$WORK/infra.list" || fail "migration Job $j references $ref, which infraOnly does not render"
     done
   done
+  [ "$JOBS_CHECKED" -eq 5 ] || fail "infraOnly reference check must see 5 migration Jobs, saw $JOBS_CHECKED"
 else
   cat "$WORK/infra.yaml.err" >&2
   fail "helm template --set infraOnly=true failed"

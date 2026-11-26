@@ -12,6 +12,15 @@ global:
   terminationGracePeriodSeconds: 30
   preStopSleepSeconds: 5          # counts inside terminationGracePeriodSeconds
 
+# Migration Jobs (templates/service/migrate-job.yaml). Their init container waits for this PostgreSQL with pg_isready,
+# using the same image as the postgres server in compose.yaml. Point host and port at an external database when the
+# chart does not run PostgreSQL itself.
+migrations:
+  waitForDatabase:
+    image: postgres:18.7-alpine
+    host: postgres
+    port: 5432
+
 # One entry per deployable service. The map key is the Deployment, Service and Compose service name.
 #   image      image to run
 #   replicas   pod count
