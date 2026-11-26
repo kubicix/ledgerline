@@ -4,6 +4,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The solution stays on net10.0 and the 10.0.x package line (ADR 0000).
+    # A major bump is a deliberate migration, not a routine update.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    # The EF Core provider needs a matching Npgsql version; a lone bump fails restore (NU1605).
+    groups:
+      npgsql:
+        patterns:
+          - "Npgsql*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -18,3 +28,7 @@ updates:
       - /src/Services/Risk/Ledgerline.Risk
     schedule:
       interval: weekly
+    # Base images follow the target framework: stay on the 10.0 tags.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
