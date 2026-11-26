@@ -779,7 +779,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T05: Helm chart: infrastructure templates
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T03.
 **Files:** Create `templates/infra/{postgres.yaml,rabbitmq.yaml,redis.yaml,keycloak.yaml,otel-lgtm.yaml,mailpit.yaml}` (StatefulSet with a PVC for PostgreSQL and RabbitMQ; Deployments for the rest; ConfigMaps carrying `init-databases.sql`, the realm JSON, and the Grafana dashboard, loaded with `.Files.Get` from `deploy/helm/ledgerline/files/`, which are copies kept in sync by `scripts/sync-helm-files.sh` and checked by the render test), each guarded by `infra.<name>.enabled`. Infrastructure that must exist before migration hooks is itself installed as `pre-install` hooks with a lower weight, or the migrate Job's init container waits for it; choose the init-container wait (simpler, no hook ordering).

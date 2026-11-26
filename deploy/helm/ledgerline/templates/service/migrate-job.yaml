@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-postgres
-          image: {{ $wait.image | quote }}
+          image: {{ $.Values.infra.postgres.image | quote }}
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
           # -U is required: the uid has no passwd entry, and without a user name pg_isready reports "no attempt".
           command:

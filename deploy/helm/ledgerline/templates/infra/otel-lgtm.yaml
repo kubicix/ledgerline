@@ -1,0 +1,169 @@
+{{- /*
+Grafana, Tempo, Loki, Prometheus and an OpenTelemetry Collector in one dev container (compose.yaml: otel-lgtm).
+Reproduces the Compose settings: a 4 GiB memory limit, and Loki, Tempo, Prometheus and Pyroscope data in memory
+(emptyDir with medium Memory counts toward the container limit, like tmpfs in Compose). /data/grafana is a plain
+emptyDir: it holds the plugins Grafana downloads at first start. Telemetry is disposable: it is lost when the pod
+restarts. Under steady load the collector exceeds the limit and the container is restarted (M3 finding, accepted
+and out of scope). The services never depend on this pod: their readiness does not look at it.
+Grafana provisions the dashboard from the files the chart carries (files/dashboards.yaml, files/ledgerline-overview.json).
+*/ -}}
+{{- $l := .Values.infra.otelLgtm }}
+{{- if $l.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-lgtm-dashboards
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "otel-lgtm" "root" $) | nindent 4 }}
+data:
+  ledgerline-overview.json: |
+    {{- .Files.Get "files/ledgerline-overview.json" | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-lgtm-provisioning
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "otel-lgtm" "root" $) | nindent 4 }}
+data:
+  dashboards.yaml: |
+    {{- .Files.Get "files/dashboards.yaml" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-lgtm
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "otel-lgtm" "root" $) | nindent 4 }}
+spec:
+  # Only Grafana has a fixed nodePort (mapped to host port 3000 by the kind cluster). Kubernetes assigns the
+  # other two ports of a NodePort Service a random node port each; they are not published to the host.
+  type: NodePort
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "otel-lgtm" "root" $) | nindent 4 }}
+  ports:
+    - name: grafana
+      port: 3000
+      targetPort: grafana
+      nodePort: {{ $l.grafanaNodePort }}
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-lgtm
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "otel-lgtm" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "otel-lgtm" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "otel-lgtm" "root" $) | nindent 8 }}
+      annotations:
+        checksum/dashboards: {{ printf "%s%s" (.Files.Get "files/ledgerline-overview.json") (.Files.Get "files/dashboards.yaml") | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $l.runAsUser | nindent 8 }}
+      containers:
+        - name: otel-lgtm
+          image: {{ $l.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grafana
+              containerPort: 3000
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $l.resources | nindent 12 }}
+          # Grafana's health endpoint. The first start downloads plugins, so the startup budget is five minutes.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: grafana
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: grafana
+            periodSeconds: 20
+            failureThreshold: 6
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: grafana
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /data/grafana
+            - name: loki-data
+              mountPath: /data/loki
+            - name: tempo-data
+              mountPath: /data/tempo
+            # Tempo 3 keeps its live store here, outside /data.
+            - name: tempo-live
+              mountPath: /var/tempo
+            - name: prometheus-data
+              mountPath: /data/prometheus
+            - name: pyroscope-data
+              mountPath: /data/pyroscope
+            - name: provisioning
+              mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/ledgerline.yaml
+              subPath: ledgerline.yaml
+              readOnly: true
+            - name: dashboards
+              mountPath: /etc/ledgerline/dashboards
+              readOnly: true
+      volumes:
+        - name: grafana-data
+          emptyDir: {}
+        - name: loki-data
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $l.memoryVolumes.loki }}
+        - name: tempo-data
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $l.memoryVolumes.tempo }}
+        - name: tempo-live
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $l.memoryVolumes.tempoLive }}
+        - name: prometheus-data
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $l.memoryVolumes.prometheus }}
+        - name: pyroscope-data
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $l.memoryVolumes.pyroscope }}
+        - name: provisioning
+          configMap:
+            name: otel-lgtm-provisioning
+            items:
+              - key: dashboards.yaml
+                path: ledgerline.yaml
+        - name: dashboards
+          configMap:
+            name: otel-lgtm-dashboards
+{{- end }}

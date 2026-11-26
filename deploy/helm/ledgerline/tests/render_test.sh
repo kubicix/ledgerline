@@ -16,6 +16,8 @@ check() { # check <description> <command...>
 }
 
 SERVICES="accounts payments risk notifications banksim gateway"
+INFRA="postgres rabbitmq redis keycloak otel-lgtm mailpit"
+is_service() { case " $SERVICES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # Splits a multi-document manifest into $2/doc<N>.yaml.
 split_docs() { # split_docs <manifest> <dir>
@@ -34,6 +36,18 @@ block() { # block <file> <key>
 
 doc_kind() { sed -n 's/^kind: *//p' "$1" | head -n 1; }
 doc_name() { awk '/^metadata:/ { m = 1; next } m && /^  name:/ { sub(/^  name: */, ""); gsub(/"/, ""); print; exit }' "$1"; }
+
+find_doc() { # find_doc <dir> <Kind> <name>: prints the path of the document, returns 1 when there is none
+  local f path
+  if [ ! -f "$1/.index" ]; then # one pass per directory: "<Kind> <name> <path>"
+    for f in "$1"/doc*.yaml; do
+      [ -f "$f" ] && echo "$(doc_kind "$f") $(doc_name "$f") $f"
+    done >"$1/.index"
+  fi
+  path="$(awk -v k="$2" -v n="$3" '$1 == k && $2 == n { print $3; exit }' "$1/.index")"
+  [ -n "$path" ] || return 1
+  echo "$path"
+}
 
 # Names of Secrets and ConfigMaps a document references (envFrom, valueFrom, volumes).
 referenced_names() { # referenced_names <file>
@@ -79,13 +93,17 @@ for svc in $SERVICES; do
   check "Deployment $svc is rendered" grep -qx "Deployment $svc" "$WORK/default.list"
   check "Service $svc is rendered" grep -qx "Service $svc" "$WORK/default.list"
 done
-DEPLOY_COUNT="$(grep -c '^Deployment ' "$WORK/default.list")"
-[ "$DEPLOY_COUNT" -eq 6 ] || fail "expected 6 Deployments, found $DEPLOY_COUNT"
+DEPLOY_COUNT=0
+for s in $SERVICES; do
+  grep -qx "Deployment $s" "$WORK/default.list" && DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
+done
+[ "$DEPLOY_COUNT" -eq 6 ] || fail "expected 6 application Deployments, found $DEPLOY_COUNT"
 
-# ---- every Deployment: probes, security, resources, shutdown --------------------------------
+# ---- every application Deployment: probes, security, resources, shutdown --------------------------------
 for f in "$WORK"/default/doc*.yaml; do
   [ "$(doc_kind "$f")" = "Deployment" ] || continue
   n="$(doc_name "$f")"
+  is_service "$n" || continue
 
   startup="$(block "$f" startupProbe)"
   live="$(block "$f" livenessProbe)"
@@ -116,11 +134,12 @@ for f in "$WORK"/default/doc*.yaml; do
   grep -Eq 'image: "?ledgerline-'"$n"':local' "$f" || fail "$n: image must be ledgerline-$n:local"
 done
 
-# ---- Services: only the gateway is a NodePort, names match Compose -------------------------
+# ---- Application Services: only the gateway is a NodePort, names match Compose -------------------------
 NODEPORTS=0
 for f in "$WORK"/default/doc*.yaml; do
   [ "$(doc_kind "$f")" = "Service" ] || continue
   n="$(doc_name "$f")"
+  is_service "$n" || continue
   if grep -q 'type: NodePort' "$f"; then
     NODEPORTS=$((NODEPORTS + 1))
     [ "$n" = "gateway" ] || fail "Service $n must not be NodePort"
@@ -170,7 +189,8 @@ for svc in payments banksim; do
 done
 [ ! -f "$WORK/default/sec-gateway.yaml" ] || fail "gateway must not have a Secret"
 # Passwords belong in Secrets only.
-for f in "$WORK"/default/cfg-*.yaml; do
+for svc in $SERVICES; do
+  f="$WORK/default/cfg-$svc.yaml"
   if grep -Eq 'Password=|amqp://|ApiKey' "$f"; then fail "$(basename "$f"): ConfigMap carries a secret value"; fi
 done
 
@@ -261,7 +281,7 @@ if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
 
   # Every Secret and ConfigMap a migration Job references must exist in the infrastructure-only render.
   # Self-check of the extractor on a Deployment, which uses envFrom the same way a Job does.
-  self="$(referenced_names "$WORK/default/$(grep -l '^kind: Deployment' "$WORK"/default/doc*.yaml | head -n 1 | xargs basename)" | sort | tr '\n' ' ')"
+  self="$(referenced_names "$(find_doc "$WORK/default" Deployment accounts)" | sort | tr '\n' ' ')"
   case "$self" in
     *-config*-secrets*) ;;
     *) fail "reference extractor self-check failed (got: $self)" ;;
@@ -282,6 +302,258 @@ else
   cat "$WORK/infra.yaml.err" >&2
   fail "helm template --set infraOnly=true failed"
 fi
+
+# ---- Infrastructure (M4-T05): hand-written manifests that reproduce compose.yaml ------------------------
+REPO="$(cd "$CHART/../../.." && pwd)"
+
+# Files the chart loads with .Files.Get are copies of their sources, refreshed by scripts/sync-helm-files.sh.
+SYNC_PAIRS="
+deploy/compose/postgres/init-databases.sql|files/init-databases.sql
+deploy/compose/keycloak/ledgerline-realm.json|files/ledgerline-realm.json
+deploy/observability/dashboards/ledgerline-overview.json|files/ledgerline-overview.json
+deploy/observability/provisioning/dashboards.yaml|files/dashboards.yaml
+"
+for pair in $SYNC_PAIRS; do
+  src="${pair%%|*}"; dst="${pair##*|}"
+  [ -f "$REPO/$src" ] || { fail "sync source $src is missing"; continue; }
+  [ -f "$CHART/$dst" ] || { fail "chart file $dst is missing (run scripts/sync-helm-files.sh)"; continue; }
+  cmp -s "$REPO/$src" "$CHART/$dst" || fail "chart file $dst differs from $src (run scripts/sync-helm-files.sh)"
+done
+[ -f "$REPO/scripts/sync-helm-files.sh" ] || fail "scripts/sync-helm-files.sh is missing"
+
+# Objects: PostgreSQL and RabbitMQ are StatefulSets with a PVC, the rest are Deployments; each has a Service.
+for n in postgres rabbitmq; do
+  grep -qx "StatefulSet $n" "$WORK/default.list" || fail "StatefulSet $n is not rendered"
+done
+for n in redis keycloak otel-lgtm mailpit; do
+  grep -qx "Deployment $n" "$WORK/default.list" || fail "Deployment $n is not rendered"
+done
+for n in $INFRA; do
+  grep -qx "Service $n" "$WORK/default.list" || fail "Service $n is not rendered"
+done
+for n in postgres rabbitmq; do
+  f="$(find_doc "$WORK/default" StatefulSet "$n")" || continue
+  grep -q 'volumeClaimTemplates:' "$f" || fail "StatefulSet $n needs volumeClaimTemplates"
+  grep -q "serviceName: $n\$" "$f" || fail "StatefulSet $n needs serviceName $n"
+done
+for n in postgres rabbitmq keycloak; do
+  grep -qx "Secret $n-secrets" "$WORK/default.list" || fail "Secret $n-secrets is not rendered"
+done
+
+# Every infrastructure workload: same image as compose.yaml, probes, limits, non-root, stated pull policy.
+infra_workload() { # infra_workload <name>: prints the StatefulSet or Deployment document of an infrastructure component
+  find_doc "$WORK/default" StatefulSet "$1" || find_doc "$WORK/default" Deployment "$1"
+}
+infra_image() { # infra_image <name> <image>
+  local f
+  f="$(infra_workload "$1")" || return 0
+  grep -Eq "image: \"?$2\"?\$" "$f" || fail "$1: image must be $2"
+}
+infra_image postgres 'postgres:18.7-alpine'
+infra_image rabbitmq 'rabbitmq:4.4-management'
+infra_image redis 'redis:8.8-alpine'
+infra_image keycloak 'quay.io/keycloak/keycloak:26.8.2'
+infra_image otel-lgtm 'grafana/otel-lgtm:0.41.0'
+infra_image mailpit 'axllent/mailpit:v1.33.1'
+
+for n in $INFRA; do
+  f="$(infra_workload "$n")" || continue
+  [ -n "$(block "$f" startupProbe)" ] || fail "$n: no startupProbe"
+  [ -n "$(block "$f" livenessProbe)" ] || fail "$n: no livenessProbe"
+  [ -n "$(block "$f" readinessProbe)" ] || fail "$n: no readinessProbe"
+  grep -q 'runAsNonRoot: true' "$f" || fail "$n: runAsNonRoot must be true"
+  grep -Eq 'runAsUser: [1-9][0-9]*' "$f" || fail "$n: runAsUser must be a non-zero uid"
+  grep -q 'allowPrivilegeEscalation: false' "$f" || fail "$n: allowPrivilegeEscalation must be false"
+  grep -q -- '- ALL' "$f" || fail "$n: capabilities must drop ALL"
+  grep -q 'requests:' <<<"$(block "$f" resources)" || fail "$n: resources.requests missing"
+  grep -q 'memory:' <<<"$(block "$f" limits)" || fail "$n: resources.limits.memory missing"
+  grep -q 'imagePullPolicy: IfNotPresent' "$f" || fail "$n: imagePullPolicy must be stated"
+done
+
+# PostgreSQL: max_connections=300, init script mounted into the entrypoint directory, password from a Secret.
+if f="$(find_doc "$WORK/default" StatefulSet postgres)"; then
+  grep -q 'max_connections=300' "$f" || fail "postgres: max_connections=300 missing"
+  grep -q 'mountPath: /docker-entrypoint-initdb.d' "$f" || fail "postgres: init script must mount at /docker-entrypoint-initdb.d"
+  grep -q 'mountPath: /var/lib/postgresql$' "$f" || fail "postgres: data volume must mount at /var/lib/postgresql"
+  grep -q 'name: postgres-init' "$f" || fail "postgres: init ConfigMap postgres-init not referenced"
+  grep -q 'pg_isready' <<<"$(block "$f" readinessProbe)" || fail "postgres: readiness must use pg_isready"
+  grep -q 'POSTGRES_PASSWORD' "$f" || fail "postgres: POSTGRES_PASSWORD missing"
+fi
+if f="$(find_doc "$WORK/default" ConfigMap postgres-init)"; then
+  grep -q 'CREATE DATABASE payments_db OWNER payments' "$f" || fail "postgres-init must carry init-databases.sql"
+else
+  fail "ConfigMap postgres-init is not rendered"
+fi
+if f="$(find_doc "$WORK/default" Secret postgres-secrets)"; then
+  grep -q 'POSTGRES_PASSWORD: "ledgerline_dev"' "$f" || fail "postgres-secrets: POSTGRES_PASSWORD"
+fi
+
+# RabbitMQ: user and password from a Secret, AMQP and management ports, compose health check as readiness.
+if f="$(find_doc "$WORK/default" StatefulSet rabbitmq)"; then
+  grep -q 'mountPath: /var/lib/rabbitmq$' "$f" || fail "rabbitmq: data volume must mount at /var/lib/rabbitmq"
+  grep -q 'check_port_connectivity' <<<"$(block "$f" readinessProbe)" || fail "rabbitmq: readiness must use check_port_connectivity"
+fi
+if f="$(find_doc "$WORK/default" Secret rabbitmq-secrets)"; then
+  grep -q 'RABBITMQ_DEFAULT_USER: "ledgerline"' "$f" || fail "rabbitmq-secrets: RABBITMQ_DEFAULT_USER"
+  grep -q 'RABBITMQ_DEFAULT_PASS: "ledgerline_dev"' "$f" || fail "rabbitmq-secrets: RABBITMQ_DEFAULT_PASS"
+fi
+if f="$(find_doc "$WORK/default" Service rabbitmq)"; then
+  grep -Eq '^ *port: 5672$' "$f" || fail "Service rabbitmq must expose 5672"
+  grep -Eq '^ *port: 15672$' "$f" || fail "Service rabbitmq must expose 15672"
+fi
+
+# Redis: append-only file on, as in compose.yaml.
+if f="$(find_doc "$WORK/default" Deployment redis)"; then
+  grep -q -- '--appendonly' "$f" || fail "redis: --appendonly missing"
+  grep -Eq '^ *- "?yes"?$' "$f" || fail "redis: appendonly must be yes"
+fi
+
+# Keycloak: Compose settings verbatim, realm import, and a startup budget at least as generous as the Compose
+# health check (30 s start period plus 30 retries of 5 s).
+if f="$(find_doc "$WORK/default" Deployment keycloak)"; then
+  grep -Eq '^ *- "?start-dev"?$' "$f" || fail "keycloak: start-dev missing"
+  grep -Eq '^ *- "?--import-realm"?$' "$f" || fail "keycloak: --import-realm missing"
+  grep -Eq '^ *- name: KC_HTTP_PORT$' "$f" || fail "keycloak: KC_HTTP_PORT missing"
+  grep -Eq 'value: "?8081"?$' "$f" || fail "keycloak: KC_HTTP_PORT must be 8081"
+  grep -Eq 'value: "?http://localhost:8081"?$' "$f" || fail "keycloak: KC_HOSTNAME must be http://localhost:8081"
+  grep -q 'name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC' "$f" || fail "keycloak: KC_HOSTNAME_BACKCHANNEL_DYNAMIC missing"
+  grep -q 'name: KC_HEALTH_ENABLED' "$f" || fail "keycloak: KC_HEALTH_ENABLED missing"
+  grep -q 'mountPath: /opt/keycloak/data/import' "$f" || fail "keycloak: realm must mount at /opt/keycloak/data/import"
+  grep -q 'name: keycloak-realm' "$f" || fail "keycloak: realm ConfigMap keycloak-realm not referenced"
+  grep -q 'port: 9000' <<<"$(block "$f" readinessProbe)" || fail "keycloak: readiness must use the management port 9000"
+  grep -q 'path: /health/ready' <<<"$(block "$f" readinessProbe)" || fail "keycloak: readiness must use /health/ready"
+  st="$(block "$f" startupProbe)"
+  period="$(sed -n 's/^ *periodSeconds: *//p' <<<"$st")"
+  threshold="$(sed -n 's/^ *failureThreshold: *//p' <<<"$st")"
+  if [ -n "$period" ] && [ -n "$threshold" ]; then
+    [ $((period * threshold)) -ge 180 ] || fail "keycloak: startup budget must be at least 180 s (is $((period * threshold)) s)"
+  else
+    fail "keycloak: startupProbe needs periodSeconds and failureThreshold"
+  fi
+fi
+if f="$(find_doc "$WORK/default" Secret keycloak-secrets)"; then
+  grep -q 'KC_BOOTSTRAP_ADMIN_USERNAME: "admin"' "$f" || fail "keycloak-secrets: KC_BOOTSTRAP_ADMIN_USERNAME"
+  grep -q 'KC_BOOTSTRAP_ADMIN_PASSWORD: "ledgerline_dev"' "$f" || fail "keycloak-secrets: KC_BOOTSTRAP_ADMIN_PASSWORD"
+fi
+if f="$(find_doc "$WORK/default" ConfigMap keycloak-realm)"; then
+  grep -q '"realm" *: *"ledgerline"' "$f" || fail "keycloak-realm must carry ledgerline-realm.json"
+else
+  fail "ConfigMap keycloak-realm is not rendered"
+fi
+
+# otel-lgtm: 4 GiB cap as in compose.yaml, telemetry directories in memory, dashboard provisioning.
+if f="$(find_doc "$WORK/default" Deployment otel-lgtm)"; then
+  grep -Eq 'memory: "?4Gi"?$' <<<"$(block "$f" limits)" || fail "otel-lgtm: memory limit must be 4Gi"
+  [ "$(grep -c 'medium: Memory' "$f")" -eq 5 ] || fail "otel-lgtm: five in-memory emptyDir volumes expected (loki, tempo, /var/tempo, prometheus, pyroscope)"
+  for d in /data/grafana /data/loki /data/tempo /var/tempo /data/prometheus /data/pyroscope /etc/ledgerline/dashboards; do
+    grep -q "mountPath: $d\$" "$f" || fail "otel-lgtm: mountPath $d missing"
+  done
+  grep -q 'mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/ledgerline.yaml' "$f" \
+    || fail "otel-lgtm: provisioning file must mount at /otel-lgtm/grafana/conf/provisioning/dashboards/ledgerline.yaml"
+fi
+if f="$(find_doc "$WORK/default" ConfigMap otel-lgtm-dashboards)"; then
+  grep -q '"uid" *: *"ledgerline-overview"' "$f" || fail "otel-lgtm-dashboards must carry ledgerline-overview.json"
+else
+  fail "ConfigMap otel-lgtm-dashboards is not rendered"
+fi
+if f="$(find_doc "$WORK/default" ConfigMap otel-lgtm-provisioning)"; then
+  grep -q 'path: /etc/ledgerline/dashboards' "$f" || fail "otel-lgtm-provisioning must carry dashboards.yaml"
+else
+  fail "ConfigMap otel-lgtm-provisioning is not rendered"
+fi
+if f="$(find_doc "$WORK/default" Service otel-lgtm)"; then
+  for p in 3000 4317 4318; do grep -Eq "^ *port: $p\$" "$f" || fail "Service otel-lgtm must expose $p"; done
+fi
+
+# Mailpit: database file under /data as in compose.yaml; SMTP and web UI ports.
+if f="$(find_doc "$WORK/default" Deployment mailpit)"; then
+  grep -q 'name: MP_DATABASE' "$f" || fail "mailpit: MP_DATABASE missing"
+  grep -q '/data/mailpit.db' "$f" || fail "mailpit: MP_DATABASE must be /data/mailpit.db"
+fi
+if f="$(find_doc "$WORK/default" Service mailpit)"; then
+  grep -Eq '^ *port: 1025$' "$f" || fail "Service mailpit must expose 1025"
+  grep -Eq '^ *port: 8025$' "$f" || fail "Service mailpit must expose 8025"
+fi
+
+# Exposure: among the infrastructure exactly Keycloak (30081), Grafana in otel-lgtm (30300) and Mailpit (30025) are
+# NodePort. Together with the gateway (30080) they are the four mappings of deploy/kind/cluster.yaml.
+for n in $INFRA; do
+  f="$(find_doc "$WORK/default" Service "$n")" || continue
+  case "$n" in
+    keycloak) want=30081 ;;
+    otel-lgtm) want=30300 ;;
+    mailpit) want=30025 ;;
+    *) want="" ;;
+  esac
+  if [ -n "$want" ]; then
+    grep -q 'type: NodePort' "$f" || fail "Service $n must be NodePort"
+    grep -q "nodePort: $want\$" "$f" || fail "Service $n must use nodePort $want"
+  else
+    grep -q 'type: ClusterIP' "$f" || fail "Service $n must be ClusterIP"
+    grep -q 'nodePort' "$f" && fail "Service $n must not set a nodePort"
+  fi
+done
+RENDERED_NODEPORTS="$(grep -h 'nodePort:' "$WORK"/default/doc*.yaml | sed 's/.*nodePort: *//' | sort -n | tr '\n' ' ')"
+KIND_NODEPORTS="$(sed -n 's/^ *- containerPort: *//p' "$REPO/deploy/kind/cluster.yaml" | sort -n | tr '\n' ' ')"
+[ "$RENDERED_NODEPORTS" = "$KIND_NODEPORTS" ] \
+  || fail "nodePorts in the chart ($RENDERED_NODEPORTS) must equal the containerPorts of deploy/kind/cluster.yaml ($KIND_NODEPORTS)"
+
+# The wait image of the migration Jobs and the PostgreSQL server image are one value, infra.postgres.image.
+if helm_render "$WORK/pgimage.yaml" --set infra.postgres.image=postgres:99.9-alpine; then
+  split_docs "$WORK/pgimage.yaml" "$WORK/pgimage"
+  if f="$(find_doc "$WORK/pgimage" StatefulSet postgres)"; then
+    grep -Eq 'image: "?postgres:99.9-alpine"?$' "$f" || fail "infra.postgres.image must reach the postgres StatefulSet"
+  else
+    fail "pgimage: StatefulSet postgres missing"
+  fi
+  if f="$(find_doc "$WORK/pgimage" Job accounts-migrate)"; then
+    grep -Eq 'image: "?postgres:99.9-alpine"?$' "$f" || fail "infra.postgres.image must reach the migration Job wait container"
+  else
+    fail "pgimage: Job accounts-migrate missing"
+  fi
+else
+  cat "$WORK/pgimage.yaml.err" >&2
+  fail "helm template with infra.postgres.image failed"
+fi
+
+# infra.<name>.enabled=false removes that component's objects and nothing else.
+if helm_render "$WORK/nopg.yaml" --set infra.postgres.enabled=false; then
+  split_docs "$WORK/nopg.yaml" "$WORK/nopg"
+  list_docs "$WORK/nopg" >"$WORK/nopg.list"
+  grep -Eq '^[A-Za-z]+ postgres' "$WORK/nopg.list" && fail "infra.postgres.enabled=false: PostgreSQL objects still render"
+  for n in rabbitmq redis keycloak otel-lgtm mailpit; do
+    grep -Eq "^(StatefulSet|Deployment) $n\$" "$WORK/nopg.list" || fail "infra.postgres.enabled=false: $n must still render"
+  done
+  [ "$(grep -c '^Job ' "$WORK/nopg.list")" -eq 5 ] || fail "infra.postgres.enabled=false: migration Jobs must still render (external database)"
+else
+  cat "$WORK/nopg.yaml.err" >&2
+  fail "helm template --set infra.postgres.enabled=false failed"
+fi
+if helm_render "$WORK/noinfra.yaml" \
+  --set infra.postgres.enabled=false --set infra.rabbitmq.enabled=false --set infra.redis.enabled=false \
+  --set infra.keycloak.enabled=false --set infra.otelLgtm.enabled=false --set infra.mailpit.enabled=false; then
+  split_docs "$WORK/noinfra.yaml" "$WORK/noinfra"
+  list_docs "$WORK/noinfra" >"$WORK/noinfra.list"
+  for n in $INFRA; do
+    grep -Eq "^[A-Za-z]+ $n(-[a-z]+)?\$" "$WORK/noinfra.list" && fail "all infra disabled: objects of $n still render"
+  done
+  grep -q '^StatefulSet ' "$WORK/noinfra.list" && fail "all infra disabled: a StatefulSet still renders"
+  [ "$(grep -c '^Deployment ' "$WORK/noinfra.list")" -eq 6 ] || fail "all infra disabled: only the 6 application Deployments may remain"
+else
+  cat "$WORK/noinfra.yaml.err" >&2
+  fail "helm template with all infrastructure disabled failed"
+fi
+
+# The infrastructure renders in the infrastructure-only pass too.
+for n in postgres rabbitmq; do
+  grep -qx "StatefulSet $n" "$WORK/infra.list" || fail "infraOnly: StatefulSet $n must render"
+done
+for n in redis keycloak otel-lgtm mailpit; do
+  grep -qx "Deployment $n" "$WORK/infra.list" || fail "infraOnly: Deployment $n must render"
+done
+for n in $INFRA; do
+  grep -qx "Service $n" "$WORK/infra.list" || fail "infraOnly: Service $n must render"
+done
 
 if [ "$FAILURES" -ne 0 ]; then
   echo "RENDER FAILED ($FAILURES failure(s))" >&2

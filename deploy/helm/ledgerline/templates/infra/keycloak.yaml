@@ -1,0 +1,127 @@
+{{- /*
+Keycloak (compose.yaml: keycloak), same settings as Compose (section 0.1 C2 of the M4 handoff): start-dev with
+--import-realm, KC_HTTP_PORT 8081 and the fixed KC_HOSTNAME http://localhost:8081. The Service is a NodePort that
+the kind cluster maps to host port 8081, so a token obtained at localhost:8081 carries the same issuer string the
+services read from http://keycloak:8081/realms/ledgerline. The realm file (214 users) makes the first start slow,
+so the startup probe allows five minutes. Health is served on the management port 9000.
+*/ -}}
+{{- $kc := .Values.infra.keycloak }}
+{{- if $kc.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-secrets
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "keycloak" "root" $) | nindent 4 }}
+type: Opaque
+stringData:
+  KC_BOOTSTRAP_ADMIN_USERNAME: {{ $kc.adminUser | quote }}
+  KC_BOOTSTRAP_ADMIN_PASSWORD: {{ $kc.adminPassword | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "keycloak" "root" $) | nindent 4 }}
+data:
+  ledgerline-realm.json: |
+    {{- .Files.Get "files/ledgerline-realm.json" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "keycloak" "root" $) | nindent 4 }}
+spec:
+  type: NodePort
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "keycloak" "root" $) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      nodePort: {{ $kc.nodePort }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "keycloak" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "keycloak" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "keycloak" "root" $) | nindent 8 }}
+      annotations:
+        checksum/realm: {{ .Files.Get "files/ledgerline-realm.json" | sha256sum }}
+    spec:
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $kc.runAsUser | nindent 8 }}
+      containers:
+        - name: keycloak
+          image: {{ $kc.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - start-dev
+            - --import-realm
+          env:
+            - name: KC_HTTP_PORT
+              value: "8081"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_HOSTNAME
+              value: {{ $kc.hostname | quote }}
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: keycloak-secrets
+          ports:
+            - name: http
+              containerPort: 8081
+            - name: management
+              containerPort: 9000
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $kc.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+{{- end }}

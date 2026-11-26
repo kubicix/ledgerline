@@ -12,12 +12,11 @@ global:
   terminationGracePeriodSeconds: 30
   preStopSleepSeconds: 5          # counts inside terminationGracePeriodSeconds
 
-# Migration Jobs (templates/service/migrate-job.yaml). Their init container waits for this PostgreSQL with pg_isready,
-# using the same image as the postgres server in compose.yaml. Point host and port at an external database when the
-# chart does not run PostgreSQL itself.
+# Migration Jobs (templates/service/migrate-job.yaml). Their init container waits for PostgreSQL with pg_isready, using
+# the client of infra.postgres.image, so the server and the wait container share one tag. Point host and port at an
+# external database when the chart does not run PostgreSQL itself (infra.postgres.enabled=false).
 migrations:
   waitForDatabase:
-    image: postgres:18.7-alpine
     host: postgres
     port: 5432
 
@@ -124,3 +123,95 @@ services:
       Auth__RequireHttpsMetadata: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
     secretEnv: {}
+
+# Dev-grade, single-replica infrastructure, written by hand with the same images as compose.yaml (templates/infra/*,
+# no Bitnami charts, no operators). Each component can be switched off with infra.<name>.enabled=false to use an
+# external one; the Kubernetes Service names (postgres, rabbitmq, redis, keycloak, otel-lgtm, mailpit) are the host names
+# the services use. Passwords are the compose.yaml development defaults: never reuse them.
+#   runAsUser  the non-root uid the image runs as (also the fsGroup of its volumes)
+#   resources  sized for one kind node, together with the six services (192Mi requested, 512Mi limit each)
+infra:
+  postgres:
+    enabled: true
+    image: postgres:18.7-alpine
+    runAsUser: 70
+    maxConnections: 300           # 5 services x 40 pooled connections = 200, plus headroom
+    password: ledgerline_dev      # superuser password; the per-service logins are created by files/init-databases.sql
+    storage: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  rabbitmq:
+    enabled: true
+    image: rabbitmq:4.4-management
+    runAsUser: 999
+    user: ledgerline
+    password: ledgerline_dev
+    storage: 1Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  redis:
+    enabled: true
+    image: redis:8.8-alpine
+    runAsUser: 999
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        memory: 256Mi
+
+  keycloak:
+    enabled: true
+    image: quay.io/keycloak/keycloak:26.8.2
+    runAsUser: 1000
+    adminUser: admin
+    adminPassword: ledgerline_dev
+    hostname: http://localhost:8081   # KC_HOSTNAME: the issuer of every token, as in compose.yaml
+    nodePort: 30081                   # mapped to host port 8081 by deploy/kind/cluster.yaml
+    resources:
+      requests:
+        cpu: 250m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
+
+  otelLgtm:
+    enabled: true
+    image: grafana/otel-lgtm:0.41.0
+    runAsUser: 1000
+    grafanaNodePort: 30300            # mapped to host port 3000 by deploy/kind/cluster.yaml
+    # In-memory telemetry directories (compose.yaml uses tmpfs). They count toward the memory limit below.
+    memoryVolumes:
+      loki: 512Mi
+      tempo: 512Mi
+      tempoLive: 512Mi
+      prometheus: 256Mi
+      pyroscope: 256Mi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        memory: 4Gi                   # as in compose.yaml; the collector can still exceed it under steady load (M3)
+
+  mailpit:
+    enabled: true
+    image: axllent/mailpit:v1.33.1
+    runAsUser: 1000
+    uiNodePort: 30025                 # mapped to host port 8025 by deploy/kind/cluster.yaml
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
