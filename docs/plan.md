@@ -688,7 +688,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T10: Results write-up
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M3-T03, M3-T09.
 **Files:** Create `docs/results/k6-<yyyy-mm-dd>.md` (hardware, Docker limits, commit hash, one table per scenario: target, measured, pass or miss, and a short explanation for each miss), `docs/results/img/{dashboard.png,trace-topup.png}` (screenshots taken by the owner or by browser automation from Grafana); modify `README.md` ("Measurements" section: summary table, both images), `docs/when-monolith.md` (fill "to be measured" cells from the baseline and `transfer-steady`). If the hot-account scenario misses its target, add a section to ADR 0007 with the numbers and the decision (shard or accept), do not silently tune the target.

@@ -165,18 +165,47 @@ How the tests work: [docs/testing.md](docs/testing.md).
 
 ## Measurements
 
-_Placeholder: filled in M3-T10. Numbers will come with hardware, commit, and misses._
+Seven k6 scenarios ran through the gateway against the Compose stack on one desktop PC:
+AMD Ryzen 5 7500F (6 cores, 12 threads), 32 GB RAM, a DRAM-less 1 TB NVMe, Docker Desktop
+on WSL2 with its defaults (12 CPUs, 15.5 GiB), one replica of every service, the scripts of commit
+`d165fea`. The load generator ran on the same machine, so **these are not capacity
+numbers**. Hardware, method, per-threshold tables and every miss are in
+[docs/results/k6-2026-11-26.md](docs/results/k6-2026-11-26.md).
 
 | Scenario | Load | p95 accept | p95 saga completion | Errors | Target met |
 |---|---|---|---|---|---|
-| Transfers, steady | TBD | TBD | TBD | TBD | TBD |
-| Top-ups, steady | TBD | TBD | TBD | TBD | TBD |
-| Hot account | TBD | TBD | TBD | TBD | TBD |
-| Spike | TBD | TBD | TBD | TBD | TBD |
+| Smoke | 5 users, 60 s | 30.31 ms | top-up 1.57 s, transfer 0.97 s | 0 % | Yes in 1 of 4 runs (see results) |
+| Transfers, steady | 100/s offered, 13.5/s sent (k6 VU ceiling) | 252.12 ms | 30 s timeout (server side 174.9 s) | 0 % | No |
+| Top-ups, steady | 50/s offered, 10.1/s sent (k6 VU ceiling) | 359.44 ms | 30 s timeout (server side 196.2 s) | 0 % | No |
+| Hot account | 100/s offered, 13.5/s sent (k6 VU ceiling) | 467.57 ms | 30 s timeout (server side 218 s) | 0 % | No |
+| Payment mix | 50/s offered, 13.3/s sent (k6 VU ceiling) | 624.90 ms | 30 s timeout | 0 % | No |
+| Spike | 20 to 300/s | 233.43 ms | 120 s probe timeout | 0 % | No |
+| Broker outage | 50/s, RabbitMQ stopped 30 s, all accepted | 119.7 ms | 150 s probe timeout; recovery at least 148 s against 60 s | 0 % | Acceptance yes, recovery no |
 
-_Placeholder: Grafana dashboard screenshot (`docs/results/img/dashboard.png`)._
+What held in every run: no lost or duplicated money (trial balance 0 in every currency),
+no payment in `ManualReview`, every outbox row relayed, and every accepted
+payment reached a final state once the backlog drained. What missed: latency and
+throughput. The stack completed about 2 to 6 sagas per second during the load, and k6 could send only
+10 to 13.5 per second of the 50 to 100 offered because every VU was waiting on a slow
+saga. Three measured reasons: the disk behind Docker Desktop stalls for about 17 s every
+55 to 90 s under the fsync load of commits and broker confirms; the outbox relay
+publishes and confirms one message at a time, so Payments' outbox lag p95 reached 61 to
+96 s; and k6's 100 ms status polling (about 1 300 to 2 000 requests per second) ran on
+the same CPU. The same transfer as one local transaction, without the broker, ran at 472
+to 1 032 per second with a p95 of 23.72 to 67.09 ms. The hot-account result and the
+decision not to shard are in [ADR 0007](docs/adr/0007-event-sourcing-scope.md).
 
-_Placeholder: one top-up trace across five services (`docs/results/img/trace-topup.png`)._
+The provisioned Grafana dashboard during the top-up load run. Panels hold only about the first
+40 s of the load because the OpenTelemetry collector in the dev telemetry container
+ran out of memory (see the results page):
+
+![Ledgerline Grafana dashboard during the topup-steady run](docs/results/img/dashboard.png)
+
+One top-up traced from the HTTP request through the outbox and RabbitMQ across six
+services (gateway, Payments, Risk, BankSimulator, Accounts, Notifications); database
+spans are filtered out:
+
+![Tempo trace of one top-up](docs/results/img/trace-topup.png)
 
 ## Run on Kubernetes
 

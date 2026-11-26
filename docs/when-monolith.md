@@ -1,6 +1,7 @@
 # When would I build this as a monolith instead?
 
-Draft. The numbers marked "to be measured" are filled in after M3.
+The measured numbers come from the M3 load runs on one desktop PC; see
+[the k6 results](results/k6-2026-11-26.md) for the hardware and the caveats.
 
 ## Short answer
 
@@ -38,7 +39,7 @@ only because of the split (inter-service messaging, inbox per service, replicate
 | Cost | Monolith | This repository |
 |---|---|---|
 | A transfer | One function call and one transaction | Two broker round trips, three local transactions, eventual consistency |
-| Transfer latency, p95 | to be measured (single transaction baseline) | to be measured |
+| Transfer latency, p95 | 23.72 to 67.09 ms for one local transaction (two runs of the baseline below; p50 13.43 to 29.68 ms, 472 to 1 032 transfers/s) | 974.8 ms saga completion (POST accepted until final status) at 5 users (smoke); at 100 transfers/s offered (`transfer-steady`) the target is missed: 6.2 completed per second (k6 could send only 13.5 per second), server-side p95 174.9 s |
 | Things that can be down independently | Database | Database, broker, four services, gateway |
 | New failure states | None | `Processing` for a long time, `ManualReview`, stale `account_refs` |
 | Code that exists only for distribution | None | Messaging layer, saga timeouts, replicas, contract versioning |
@@ -46,8 +47,10 @@ only because of the split (inter-service messaging, inbox per service, replicate
 | Debugging a failed payment | One log, one stack trace | A distributed trace across four services |
 | Deployment | One image, one migration | Five images, five migration jobs, a chart |
 
-The plan includes a small benchmark that runs the same transfer as one local
-transaction inside Accounts, to put a real number next to the distributed one.
+The baseline is `LocalTransferBaseline` (opt-in with `LEDGERLINE_BENCH=1`): 10 000 transfers
+posted as one local transaction each inside Accounts, 16 workers, no broker. Both
+numbers come from the same machine, whose disk stalls under fsync load, which is
+why the two baseline runs differ by 2x.
 
 ## What the split bought here
 
@@ -56,8 +59,10 @@ Honestly, little that this system needs:
 - Notifications or Risk can be down without stopping the ledger. In a monolith a
   bulkhead and a queue in front of email give most of that.
 - Risk rules could be released independently. With one developer that is not a need.
-- Each service can scale independently. The measured bottleneck is the ledger's row
-  locks on hot accounts, which no service split improves.
+- Each service can scale independently. On the test machine the measured limits were
+  the disk's fsync stalls and the one-at-a-time outbox relay, and the hot-account run
+  did not show the ledger's row locks as the limit (ADR 0007). The split itself adds
+  the relay; it does not remove either limit.
 
 ## When I would split
 
