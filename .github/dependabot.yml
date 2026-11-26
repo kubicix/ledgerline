@@ -1,23 +1,37 @@
 version: 2
+# One grouped pull request per ecosystem per month. Vulnerable packages are caught
+# separately: Dependabot alerts and the `security` CI job run on every push.
 updates:
   - package-ecosystem: nuget
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     # The solution stays on net10.0 and the 10.0.x package line (ADR 0000).
     # A major bump is a deliberate migration, not a routine update.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-    # The EF Core provider needs a matching Npgsql version; a lone bump fails restore (NU1605).
+    # One pull request for every minor and patch bump. Packages that must move
+    # together (the EF Core provider needs a matching Npgsql version, NU1605) do.
     groups:
-      npgsql:
+      nuget:
         patterns:
-          - "Npgsql*"
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    # Minor and patch bumps come together; a major action bump stays its own pull request.
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: docker
     directories:
       - /src/Gateway/Ledgerline.Gateway
@@ -27,8 +41,15 @@ updates:
       - /src/Services/Payments/Ledgerline.Payments
       - /src/Services/Risk/Ledgerline.Risk
     schedule:
-      interval: weekly
+      interval: monthly
     # Base images follow the target framework: stay on the 10.0 tags.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+    groups:
+      base-images:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
