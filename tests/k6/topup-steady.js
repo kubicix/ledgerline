@@ -4,7 +4,7 @@ import exec from 'k6/execution';
 import { seedTokens } from './lib/auth.js';
 import { topUpBody } from './lib/api.js';
 import { SAGA_GRACEFUL_STOP, runSaga } from './lib/saga.js';
-import { randomAmountMinor, setupRun, summaryWithoutSetupData, teardownRun, walletOfVu } from './lib/setup.js';
+import { TEARDOWN_TIMEOUT, randomAmountMinor, setupRun, summaryWithoutSetupData, teardownRun, walletOfVu } from './lib/setup.js';
 import { SUMMARY_TREND_STATS, thresholdsFor } from './lib/thresholds.js';
 
 export const options = {
@@ -18,6 +18,8 @@ export const options = {
   thresholds: thresholdsFor(['topup']),
   summaryTrendStats: SUMMARY_TREND_STATS,
   setupTimeout: '600s',
+  // Covers teardown's wait for the backlog to drain (lib/setup.js).
+  teardownTimeout: TEARDOWN_TIMEOUT,
 };
 
 export function setup() {

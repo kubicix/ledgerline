@@ -26,8 +26,19 @@ const REQUESTED_TIMEOUT_MS = Number(__ENV.SAGA_TIMEOUT_MS || 30000);
 const MIN_TIMEOUT_MS = 2 * Math.max(...Object.values(SAGA_TARGET_P95_MS));
 const POLL_TIMEOUT_MS = Math.max(REQUESTED_TIMEOUT_MS || 0, MIN_TIMEOUT_MS);
 
+/** The poll timeout a saga uses: a caller's timeoutMs can only raise it, never lower it below POLL_TIMEOUT_MS. */
+const timeoutOf = (timeoutMs) => Math.max(POLL_TIMEOUT_MS, Number(timeoutMs) || 0);
+
+/**
+ * Scenario gracefulStop for iterations that run `sagas` sagas one after another, each polled up to `timeoutMs`
+ * (raised to POLL_TIMEOUT_MS): long enough for the last one started before the end to finish or time out.
+ */
+export function gracefulStopFor(timeoutMs, sagas) {
+  return `${(sagas || 1) * Math.ceil(timeoutOf(timeoutMs) / 1000) + 10}s`;
+}
+
 /** Scenario gracefulStop: long enough for a saga started just before the end to finish or time out and be recorded. */
-export const SAGA_GRACEFUL_STOP = `${Math.ceil(POLL_TIMEOUT_MS / 1000) + 10}s`;
+export const SAGA_GRACEFUL_STOP = gracefulStopFor(0, 1);
 
 /** Called once from setup(): says when SAGA_TIMEOUT_MS was raised to the minimum. */
 export function logSagaTimeout() {
@@ -36,25 +47,46 @@ export function logSagaTimeout() {
   }
 }
 
+/** The payment's status, or null while GET /api/payments/{id} does not answer 200. */
+const paymentStatus = (user, id) => {
+  const res = getPayment(user, id);
+  return res.status === 200 ? res.json('status') : null;
+};
+
 /**
- * POSTs the payment (tag op:accept, which the POST accept latency thresholds select) and polls it with the caller's
- * token until it is final. Returns the final status, 'NotAccepted' or 'Timeout'.
+ * POSTs a request that starts a saga step (tag op:accept, which the POST accept latency thresholds select). `name`
+ * is the request name tag for a path with an id in it (default: the path). Returns the accepted resource's id, or
+ * null when the answer was not 202 (counted in accept_failed).
  */
-export function runSaga(kind, user, path, body, idempotencyKey) {
-  const accepted = post(user, path, body, idempotencyKey, path, { op: 'accept', kind });
+export function acceptSaga(kind, user, path, body, idempotencyKey, name) {
+  const accepted = post(user, path, body, idempotencyKey, name || path, { op: 'accept', kind });
   if (accepted.status !== 202) {
     acceptFailed.add(1, { kind, status: String(accepted.status) });
-    return 'NotAccepted';
+    return null;
   }
+  return accepted.json('id');
+}
+
+/**
+ * Polls an accepted saga every 100 ms with the user's token and records it in saga_completion_ms. Options, all
+ * optional (the defaults are the payment sagas that end Completed):
+ * - success: the status that counts as completed (default 'Completed'). Polling stops at it or at any final status.
+ * - read(user, id): returns the current status or null (default: GET /api/payments/{id}).
+ * - timeoutMs: raises the poll timeout for this saga (it never goes below POLL_TIMEOUT_MS).
+ * Returns the status polling stopped at, or 'Timeout'.
+ */
+export function awaitSaga(kind, user, id, options) {
+  const opts = options || {};
+  const success = opts.success || 'Completed';
+  const read = opts.read || paymentStatus;
+  const timeoutMs = timeoutOf(opts.timeoutMs);
   const started = Date.now();
-  const id = accepted.json('id');
   for (;;) {
     sleep(POLL_INTERVAL_S);
-    const res = getPayment(user, id);
-    const status = res.status === 200 ? res.json('status') : null;
-    if (status && FINAL.has(status)) {
+    const status = read(user, id);
+    if (status && (status === success || FINAL.has(status))) {
       const elapsed = Date.now() - started;
-      if (status === 'Completed') {
+      if (status === success) {
         sagaCompletion.add(elapsed, { kind });
         sagaCompleted.add(1, { kind });
       } else {
@@ -63,10 +95,19 @@ export function runSaga(kind, user, path, body, idempotencyKey) {
       }
       return status;
     }
-    if (Date.now() - started >= POLL_TIMEOUT_MS) {
+    if (Date.now() - started >= timeoutMs) {
       sagaCompletion.add(Date.now() - started, { kind });
       sagaTimeouts.add(1, { kind });
       return 'Timeout';
     }
   }
+}
+
+/**
+ * POSTs the payment (acceptSaga) and polls it with the caller's token until it is final (awaitSaga, same options).
+ * Returns the final status, 'NotAccepted' or 'Timeout'.
+ */
+export function runSaga(kind, user, path, body, idempotencyKey, options) {
+  const id = acceptSaga(kind, user, path, body, idempotencyKey);
+  return id === null ? 'NotAccepted' : awaitSaga(kind, user, id, options);
 }

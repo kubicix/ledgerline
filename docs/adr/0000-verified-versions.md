@@ -123,6 +123,14 @@ for `k6/http` `setResponseCallback` and `expectedStatuses`, thresholds, `k6/metr
   (`setup_data`) unless an exported `handleSummary(data)` deletes `data.setup_data`, which it does before the export
   is written; a `handleSummary` that returns `undefined` keeps the default end-of-test summary on stdout.
   `k6/summary` is not a built-in module.
+- Checked 2026-11-26 for M3-T09 in `grafana/k6:2.4.0`:
+  - `k6 inspect` exits 0 for `transfer-hot-account.js`, `payment-mix.js`, `spike.js` and `broker-outage.js`.
+  - `ramping-arrival-rate` takes `startRate`, `timeUnit`, `stages` (`duration`, `target`), `preAllocatedVUs` and
+    `maxVUs` as documented.
+  - Two scenarios in one script, each with its own `exec` function, run side by side.
+  - A `max<x` threshold on a `Trend` is evaluated; a crossed one prints `max=` and exits 99. Checked with a
+    throwaway script run with `k6 run`.
+  - `gracefulStop` given in seconds (for example `130s`) is normalised to `2m10s` by `inspect`.
 
 ## Not verified
 

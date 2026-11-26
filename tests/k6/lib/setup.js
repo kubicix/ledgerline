@@ -109,11 +109,54 @@ export function setupRun(key) {
   };
 }
 
-/** teardown() body: restores the velocity rule, then checks that every currency's trial balance sums to zero. */
+// Teardown waits up to DRAIN_WAIT_S (default 900) for the run's backlog to drain before it restores the velocity rule:
+// payments still before the risk step would otherwise be judged by the seeded rule and rejected.
+const DRAIN_WAIT_S = Number(__ENV.DRAIN_WAIT_S || 900);
+const DRAIN_POLL_S = 5;
+// Admin requests are spaced so a sweep stays below the gateway's per-user limit (50 requests/s).
+const DRAIN_REQUEST_GAP_S = 0.025;
+
+/** Scenario teardownTimeout: the drain wait plus time for the rule update and the trial balance check. */
+export const TEARDOWN_TIMEOUT = `${DRAIN_WAIT_S + 120}s`;
+
+/**
+ * Waits until no payment of the run's customer wallets is Processing (admin: GET /api/payments?accountId&status), or
+ * until DRAIN_WAIT_S has passed. No load runs during teardown, so a wallet seen drained stays drained and is not asked
+ * again. Returns true when everything drained.
+ */
+function waitForDrain(admin, wallets) {
+  const deadline = Date.now() + DRAIN_WAIT_S * 1000;
+  let pending = wallets.map((w) => w.id);
+  for (;;) {
+    pending = pending.filter((id) => {
+      const res = get(admin, `/api/payments?accountId=${id}&status=Processing&limit=1`, '/api/payments', { op: 'check' });
+      sleep(DRAIN_REQUEST_GAP_S);
+      return res.status !== 200 || res.json('items').length > 0;
+    });
+    if (pending.length === 0) return true;
+    if (Date.now() >= deadline) {
+      console.error(`teardown: ${pending.length} wallets still had Processing payments after ${DRAIN_WAIT_S} s`);
+      return false;
+    }
+    sleep(DRAIN_POLL_S);
+  }
+}
+
+/**
+ * teardown() body: waits for the backlog to drain, restores the velocity rule, then checks that every currency's trial
+ * balance sums to zero. When the drain deadline passes, the raised rule is left in place (setup restores the seed when
+ * it finds the sentinel on the next run).
+ */
 export function teardownRun(data) {
   // tokenFor() renews the admin token if it expired during a long run.
   const admin = USERS.admin;
-  if (data && data.velocityRestore) updateRule(admin, data.velocityRestore, data.velocityRestore);
+  const started = Date.now();
+  const drained = waitForDrain(admin, (data && data.customers) || []);
+  console.log(`teardown: backlog ${drained ? 'drained' : 'not drained'} after ${Math.round((Date.now() - started) / 1000)} s`);
+  if (data && data.velocityRestore) {
+    if (drained) updateRule(admin, data.velocityRestore, data.velocityRestore);
+    else console.error('teardown: velocity rule left raised because the backlog did not drain');
+  }
   const res = getTrialBalance(admin);
   if (res.status !== 200) throw new Error(`GET /api/ledger/trial-balance failed with ${res.status}`);
   trialBalanceChecks.add(1);

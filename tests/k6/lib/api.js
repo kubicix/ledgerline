@@ -52,7 +52,10 @@ export const openWallet = (user, type, currency, key) =>
 
 export const getPayment = (user, id) => get(user, `/api/payments/${id}`, '/api/payments/{id}', { op: 'poll' });
 
-export const getTrialBalance = (admin) => get(admin, '/api/ledger/trial-balance', '/api/ledger/trial-balance', { op: 'check' });
+export const listRefunds = (user, paymentId) =>
+  get(user, `/api/payments/${paymentId}/refunds?limit=100`, '/api/payments/{id}/refunds', { op: 'poll' });
+
+export const getTrialBalance =(admin) => get(admin, '/api/ledger/trial-balance', '/api/ledger/trial-balance', { op: 'check' });
 
 export function topUpBody(accountId, amountMinor, currency) {
   return { accountId, amountMinor, currency, cardToken: 'tok_ok' };
@@ -60,4 +63,9 @@ export function topUpBody(accountId, amountMinor, currency) {
 
 export function transferBody(fromAccountId, toAccountId, amountMinor, currency) {
   return { fromAccountId, toAccountId, amountMinor, currency };
+}
+
+/** POST /api/payments by the customer: authorizes (Manual) or authorizes and captures (Automatic) a merchant payment. */
+export function merchantPaymentBody(customerAccountId, merchantAccountId, amountMinor, currency, captureMode) {
+  return { customerAccountId, merchantAccountId, amountMinor, currency, captureMode };
 }

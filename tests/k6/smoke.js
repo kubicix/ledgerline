@@ -6,7 +6,7 @@ import exec from 'k6/execution';
 import { seedTokens } from './lib/auth.js';
 import { topUpBody, transferBody } from './lib/api.js';
 import { SAGA_GRACEFUL_STOP, runSaga } from './lib/saga.js';
-import { randomAmountMinor, randomOtherWallet, setupRun, summaryWithoutSetupData, teardownRun, walletOfVu } from './lib/setup.js';
+import { TEARDOWN_TIMEOUT, randomAmountMinor, randomOtherWallet, setupRun, summaryWithoutSetupData, teardownRun, walletOfVu } from './lib/setup.js';
 import { SUMMARY_TREND_STATS, thresholdsFor } from './lib/thresholds.js';
 
 export const options = {
@@ -20,6 +20,8 @@ export const options = {
   thresholds: thresholdsFor(['topup', 'transfer']),
   summaryTrendStats: SUMMARY_TREND_STATS,
   setupTimeout: '600s',
+  // Covers teardown's wait for the backlog to drain (lib/setup.js).
+  teardownTimeout: TEARDOWN_TIMEOUT,
 };
 
 export function setup() {

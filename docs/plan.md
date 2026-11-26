@@ -679,7 +679,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T09: k6 contention, mix, spike, outage scenarios and the monolith baseline
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 5; `when-monolith.md` (baseline). **Depends:** M3-T08.
 **Files:** `tests/k6/{transfer-hot-account.js,payment-mix.js,spike.js,broker-outage.js}`; `tests/Ledgerline.Accounts.IntegrationTests/Benchmarks/LocalTransferBaseline.cs` (a test, skipped unless `LEDGERLINE_BENCH=1`, that runs 10 000 transfers by calling `ILedger.PostAsync` directly in a transaction with 16 parallel workers and prints p50, p95, and transfers per second).
