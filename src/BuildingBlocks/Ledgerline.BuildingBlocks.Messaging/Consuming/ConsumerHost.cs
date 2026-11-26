@@ -12,21 +12,26 @@ namespace Ledgerline.BuildingBlocks.Messaging.Consuming;
 
 public sealed partial class ConsumerHost<TDbContext>(RabbitMqConnection connection, HandlerRegistry handlers,
     IServiceScopeFactory scopes, IAckStrategy acknowledgments, ConsumerOptions options, IClock clock, ICrashPoint crashPoint,
-    ILogger<ConsumerHost<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
+    IHostApplicationLifetime lifetime, ILogger<ConsumerHost<TDbContext>> logger) : BackgroundService where TDbContext : DbContext
 {
     private readonly MessagingMetrics metrics = new(options.Service);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        // The drain starts when shutdown starts (ApplicationStopping), not when this service's StopAsync is reached, so it
+        // runs alongside the web server's stop. StopAsync then only awaits this same drain.
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, lifetime.ApplicationStopping);
+        var stop = stopping.Token;
+        while (!stop.IsCancellationRequested)
         {
-            try { await ConsumeChannelAsync(stoppingToken); }
+            try { await ConsumeChannelAsync(stop); }
             catch (HostAbortedException) { return; }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
             catch (Exception error)
             {
                 HandlerFailed(logger, error);
-                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+                try { await Task.Delay(TimeSpan.FromMilliseconds(250), stop); }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
             }
         }
     }

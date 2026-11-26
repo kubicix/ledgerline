@@ -31,7 +31,7 @@ if (command == "migrate")
 }
 builder.AddLedgerlineTelemetry("payments");
 builder.AddLedgerlineWebDefaults("payments");
-builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("database", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<PaymentsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddSingleton<SagaMetrics>();

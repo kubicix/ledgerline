@@ -33,6 +33,7 @@ ADR refers to it instead of repeating numbers.
 | RabbitMQ.Client | 7.2.2 | Apache-2.0 OR MPL-2.0 | Messaging transport |
 | MailKit | 5.0.0 | MIT | SMTP sender. Verified on nuget.org/packages/MailKit/5.0.0 on 2026-11-13 |
 | Microsoft.EntityFrameworkCore (and ASP.NET Core packages) | 10.0.15 | MIT | Persistence, web. Latest `10.0.x`; `11.0.0` is the newest overall |
+| Microsoft.Extensions.Diagnostics.HealthChecks | 10.0.15 | MIT | Broker readiness check in `BuildingBlocks.Messaging` (M4-T02). Checked on nuget.org on 2026-11-26: 10.0.15 is the latest `10.0.x` |
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3 | PostgreSQL | EF Core provider |
 | StackExchange.Redis | 3.4.35 | MIT | Idempotency cache, velocity windows, locks |
 | Yarp.ReverseProxy | 2.3.0 | MIT | Gateway. Targets net8.0 at most; runs on net10.0 |

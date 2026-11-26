@@ -20,7 +20,7 @@ if (migrate)
 }
 builder.AddLedgerlineTelemetry("notifications");
 builder.AddLedgerlineWebDefaults("notifications");
-builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("database", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<NotificationsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<NotificationPlanner>();

@@ -749,7 +749,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T02: Health and shutdown behavior required by Kubernetes
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 8 (graceful shutdown) and 9 (Health); ADR 0011. **Depends:** M3 complete.
 **Files:** Modify Web `Health/HealthEndpoints.cs` (ready check includes a RabbitMQ connection check supplied by Messaging through `IHealthCheck` registration), Messaging `RabbitMq/RabbitMqHealthCheck.cs`, Web `WebDefaults.cs` (`HostOptions.ShutdownTimeout = 25 s`; readiness returns 503 as soon as `ApplicationStopping` fires). Test `tests/Ledgerline.Accounts.IntegrationTests/HealthTests.cs`.
