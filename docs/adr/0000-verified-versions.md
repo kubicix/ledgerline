@@ -36,7 +36,12 @@ ADR refers to it instead of repeating numbers.
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3 | PostgreSQL | EF Core provider |
 | StackExchange.Redis | 3.4.35 | MIT | Idempotency cache, velocity windows, locks |
 | Yarp.ReverseProxy | 2.3.0 | MIT | Gateway. Targets net8.0 at most; runs on net10.0 |
-| OpenTelemetry.* (Extensions.Hosting, OTLP exporter, AspNetCore instrumentation) | 1.21.0 | Apache-2.0 | Observability |
+| OpenTelemetry.Extensions.Hosting | 1.21.0 | Apache-2.0 | Observability. Re-verified on nuget.org on 2026-11-25 (M3), with the four rows below |
+| OpenTelemetry.Exporter.OpenTelemetryProtocol | 1.21.0 | Apache-2.0 | OTLP export of traces, metrics, logs |
+| OpenTelemetry.Instrumentation.AspNetCore | 1.21.0 | Apache-2.0 | Versions independently of the SDK; 1.21.0 is the latest stable |
+| OpenTelemetry.Instrumentation.Http | 1.21.0 | Apache-2.0 | Versions independently of the SDK; 1.21.0 is the latest stable |
+| Npgsql.OpenTelemetry | 10.0.3 | PostgreSQL | Npgsql tracing. Depends on Npgsql 10.0.3, the version the solution resolves (10.0.4 exists and would pull Npgsql 10.0.4) |
+| OpenTelemetry.Exporter.InMemory | 1.21.0 | Apache-2.0 | Tests only (`TracingTests`) |
 | Microsoft.Extensions.Http.Resilience | 10.11.0 | MIT | Bank HTTP client retries and timeouts |
 | xunit.v3 | 4.0.3 | Apache-2.0 | Tests |
 | Shouldly | 4.3.0 | BSD-3-Clause | Assertions |
@@ -70,7 +75,9 @@ Considered and not used:
 | axllent/mailpit | v1.33.1 | Fake SMTP with a web UI |
 | apache/kafka | 4.4.0 | Phase 2. KRaft mode, no ZooKeeper |
 | mongo | 9.0 (9.0.8) | Phase 2. Re-verify at M5; 8.0 is the fallback |
-| grafana/k6 | 2.4.0 | Load tests |
+| zricethezav/gitleaks | v8.30.1 | Secret scan for local runs. Docker Hub tag checked 2026-11-26; the README also names `ghcr.io/gitleaks/gitleaks` |
+| grafana/k6 | 2.4.0 | Load tests. Pulled on 2026-11-25: digest `sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276`, `k6 version` prints `k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)`. Script API checked for M3-T08, see below |
+| aquasec/trivy | 0.70.0 | Local image scan, same Trivy version as the CI action default. Docker Hub tag checked 2026-11-26 (no `v` prefix); pulled digest `sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e`. Used instead of `:latest` |
 
 ## Tools and GitHub Actions
 
@@ -82,13 +89,51 @@ Considered and not used:
 | actions/checkout | v7 |
 | actions/setup-dotnet | v6 |
 | actions/upload-artifact | v7 |
-| actions/dependency-review-action | v5 |
-| gitleaks/gitleaks-action | v3 |
-| aquasecurity/trivy-action | v0.36.0 |
+| actions/dependency-review-action | v5. Re-checked 2026-11-26: latest release v5.0.1; `v5` is a branch, not a tag. Private repositories need GitHub Advanced Security (README) |
+| gitleaks/gitleaks-action | v3. Re-checked 2026-11-26: tag `v3` (v3.0.0, Node 24). No license key needed for personal-account repositories, required for organizations (README). CI pins the CLI with `GITLEAKS_VERSION: 8.30.1`. On pull requests it calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits` (v3 `src/gitleaks.js`; the README lists no permissions), so the job grants `pull-requests: read` |
+| aquasecurity/trivy-action | v0.36.0. Verified 2026-11-26: tag `refs/tags/v0.36.0` exists and is the latest release (2026-04-22, GitHub releases API). Its `action.yaml` defaults the Trivy CLI to `v0.70.0` (installed through `aquasecurity/setup-trivy` v0.2.6, pinned by hash); CI passes `version: v0.70.0` explicitly. The newest Trivy release is v0.76.2 (2026-11-05); CI stays on the action default |
 | helm/kind-action | v1.15.2 |
 | azure/setup-helm | v5 |
 | grafana/setup-k6-action | v1 |
-| github/codeql-action | Major version **not verified** (the releases API returns bundle tags). Check the action README at M3 |
+| github/codeql-action | v4. Verified 2026-11-26: tag `refs/tags/v4` exists; newest tag v4.39.5 (GitHub tags API) |
+| gitleaks CLI | v8.30.1. Latest release (GitHub releases API, 2026-11-26) |
+
+## Specifications
+
+| Item | Status | Note |
+|---|---|---|
+| OpenTelemetry messaging semantic conventions | Development (not stable), release v1.45.0 of 2026-11-02 | Checked in the `open-telemetry/semantic-conventions` repository on 2026-11-25. v1.45.0 renamed `messaging.system` to `messaging.system.name`. Ledgerline spans emit both, plus `messaging.destination.name` and `messaging.message.id` |
+
+## k6 2.x script API (checked 2026-11-25 for M3-T08)
+
+Sources: the k6 v2 migration guide (`grafana.com/docs/k6/latest/get-started/migrating-to-v2/`), the `latest` docs pages
+for `k6/http` `setResponseCallback` and `expectedStatuses`, thresholds, `k6/metrics` `Trend` and the
+`constant-arrival-rate` executor, and throwaway scripts run in `grafana/k6:2.4.0` itself.
+
+- Unchanged in 2.x and used as documented: `k6/http` (`http.get`, `http.post`, `http.put`, per-request `tags` and
+  `responseCallback`, `http.expectedStatuses`), `options.scenarios` with `constant-vus` and `constant-arrival-rate`
+  (`rate`, `timeUnit`, `duration`, `preAllocatedVUs`, `maxVUs`, `exec`, scenario `tags`), `options.thresholds` with
+  tagged sub-metrics (several tags in one selector, for example `http_req_duration{phase:load,op:accept}`, work), and
+  `new Trend(name, true)` with `add(value, tags)`.
+- Removed in 2.0: `--no-summary` (use `--summary-mode=disabled`), `--summary-mode=legacy`, the `externally-controlled`
+  executor, `options.ext.loadimpact`, `k6/experimental/redis`. None is used here.
+- `k6 run --summary-export <file>` still exists in 2.4.0 (`k6 run --help`). In the exported JSON a threshold value of
+  `false` means the threshold passed.
+- Measured in 2.4.0: a crossed threshold exits 99; an exception thrown in `teardown()` exits 107; a threshold on a tagged
+  sub-metric with no samples passes (`p(95)` reads 0), so the scenarios pair each saga trend with a `count>0` guard;
+  metrics added in `teardown()` count toward thresholds; requests in `setup()` and `teardown()` carry no scenario tags
+  (only `group` `::setup` or `::teardown`); the `--summary-export` JSON includes the value `setup()` returned
+  (`setup_data`) unless an exported `handleSummary(data)` deletes `data.setup_data`, which it does before the export
+  is written; a `handleSummary` that returns `undefined` keeps the default end-of-test summary on stdout.
+  `k6/summary` is not a built-in module.
+- Checked 2026-11-26 for M3-T09 in `grafana/k6:2.4.0`:
+  - `k6 inspect` exits 0 for `transfer-hot-account.js`, `payment-mix.js`, `spike.js` and `broker-outage.js`.
+  - `ramping-arrival-rate` takes `startRate`, `timeUnit`, `stages` (`duration`, `target`), `preAllocatedVUs` and
+    `maxVUs` as documented.
+  - Two scenarios in one script, each with its own `exec` function, run side by side.
+  - A `max<x` threshold on a `Trend` is evaluated; a crossed one prints `max=` and exits 99. Checked with a
+    throwaway script run with `k6 run`.
+  - `gracefulStop` given in seconds (for example `130s`) is normalised to `2m10s` by `inspect`.
 
 ## Not verified
 
@@ -97,9 +142,6 @@ Considered and not used:
 - Hangfire license text and which features are paid.
 - Whether Wolverine 6.x requires the separate `WolverineFx.RuntimeCompilation` package
   (seen only in a third-party pull request). Not relevant since Wolverine is not used.
-- `github/codeql-action` current major version.
-- Whether the gitleaks GitHub Action needs a license key for this repository type
-  (historically required for organizations, free for personal accounts).
 - Bitnami chart and image availability. Bitnami changed its free catalog in 2025; this
   project avoids Bitnami for that reason (ADR 0011), and the current terms were not
   re-checked.

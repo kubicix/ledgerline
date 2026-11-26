@@ -99,6 +99,7 @@ public sealed class ConsumerTests(InfrastructureFixture infrastructure)
     {
         var (cs, ids) = await CreateDatabaseAsync(1);
         var service = "consumer" + Ids.New().ToString("N");
+        using var metrics = MetricRecorder.ForMeter("Ledgerline");
         using var host = CreateHost(cs, service);
         await host.StartAsync(TestContext.Current.CancellationToken);
         await WaitConsumersAsync(service, 1);
@@ -111,6 +112,8 @@ public sealed class ConsumerTests(InfrastructureFixture infrastructure)
         await host.StopAsync(TestContext.Current.CancellationToken);
         await AssertEffectsAsync(cs, ids);
         await AssertQueueEmptyAsync(service);
+        // docs/testing.md: the duplicate metric is 1. The listener is process-wide, so only this test's service counts.
+        metrics.Of("ledgerline.inbox.duplicates", m => Equals(m.Tag("ledgerline.service"), service)).Sum(m => (long)m.Value).ShouldBe(1);
     }
 
     [Fact]

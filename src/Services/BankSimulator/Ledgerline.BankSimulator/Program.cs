@@ -1,6 +1,7 @@
 using Ledgerline.BankSimulator.Features;
 using Ledgerline.BankSimulator.Infrastructure;
 using Ledgerline.BuildingBlocks.Web;
+using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Microsoft.EntityFrameworkCore;
 
 var migrate = args.FirstOrDefault() == "migrate";
@@ -11,6 +12,7 @@ if (migrate)
         ?? throw new InvalidOperationException("ConnectionStrings:Database is required."));
     return;
 }
+builder.AddLedgerlineTelemetry("banksim");
 builder.AddLedgerlineWebDefaults("banksim");
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("database", timeout: TimeSpan.FromSeconds(3));
 builder.Services.Configure<BankOptions>(builder.Configuration.GetSection("Bank"));

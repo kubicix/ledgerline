@@ -599,7 +599,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T01: OpenTelemetry wiring and one trace across the broker
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009; `building-blocks.md` section 9 (Telemetry). **Depends:** M2 complete.
 **Files:** Create in Web `Telemetry/TelemetryExtensions.cs`; in Messaging `Diagnostics/MessagingActivitySource.cs` (source name `Ledgerline.Messaging`), modify `OutboxRelay.cs`, `RabbitMqOutboxPublisher.cs`, `ConsumerHost.cs`. Add `OpenTelemetry.Extensions.Hosting`, `OpenTelemetry.Exporter.OpenTelemetryProtocol`, `OpenTelemetry.Instrumentation.AspNetCore`, `OpenTelemetry.Instrumentation.Http` 1.21.0 (check the exact latest version of each instrumentation package on nuget.org; they version independently), and an Npgsql OpenTelemetry package matching the Npgsql version. Modify every service `Program.cs` (`builder.AddLedgerlineTelemetry("<service>")`), `compose.yaml` (`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4317`). Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/TracingTests.cs` (in-memory exporter from `OpenTelemetry.Exporter.InMemory`).
@@ -609,7 +609,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T02: Custom metrics
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009 metric table. **Depends:** M3-T01.
 **Files:** Create in Messaging `Diagnostics/MessagingMetrics.cs`; in Payments `Sagas/SagaMetrics.cs`; in Accounts `Ledger/LedgerMetrics.cs` (the imbalance gauge reads a cached trial balance refreshed every 15 s). Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/MetricsTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/MetricsTests.cs`, `tests/Ledgerline.Accounts.IntegrationTests/MetricsTests.cs` (use `MeterListener`).
@@ -619,7 +619,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T03: Grafana dashboards as code
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0009. **Depends:** M3-T02.
 **Files:** Create `deploy/observability/dashboards/ledgerline-overview.json` (panels: request rate and p95 per service, saga duration p50/p95 by kind, saga outcomes, outbox pending and lag p95 per service, inbox duplicates rate, consumer retries and dead letters, ledger posting duration p95, ledger imbalance stat, manual review stat), `deploy/observability/provisioning/dashboards.yaml`; modify `compose.yaml` (mount both into `otel-lgtm`; check the image documentation for the provisioning paths, they are not verified here). Create `docs/observability.md` (how to open the dashboard and find a trace by payment ID).
@@ -629,7 +629,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T04: Remaining integration failure tests
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` sections F1 to F5. **Depends:** M2 complete.
 **Files:** Create `tests/Ledgerline.ArchitectureTests/FailureTestInventoryTests.cs` with the list of every exact test name from `testing.md` F1 to F5 (integration rows) and one test `Every_documented_failure_test_exists` that reflects over the integration test assemblies (add project references) and fails for a missing name. Then add any test the inventory reports missing in its owning project.
@@ -639,7 +639,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T05: System test harness
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 3 (System rows), section 4. **Depends:** M2-T19.
 **Files:** In `tests/Ledgerline.SystemTests/`: `Harness/ComposeStack.cs` (`UpAsync`, `StopAsync(service)`, `StartAsync(service)`, `KillAsync(service)` using `docker compose -p ledgerline-systest --profile app ...` through `System.Diagnostics.Process`; collects logs on failure), `Harness/KeycloakTokens.cs`, `Harness/LedgerlineClient.cs` (typed calls through the gateway), `Harness/Workloads.cs`, `Harness/SystemInvariants.cs` (trial balance zero through the admin API; sum of wallet balances equals completed top-ups minus nothing else; every payment final), `SmokeSystemTests.cs`. Tests are skipped unless environment variable `LEDGERLINE_SYSTEM_TESTS=1` (so `dotnet test --solution` stays fast).
@@ -649,7 +649,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T06: System failure tests: broker outage and service kills
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F1 and F2 system rows. **Depends:** M3-T05.
 **Files:** `tests/Ledgerline.SystemTests/FailureSystemTests.cs`.
@@ -659,7 +659,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T07: System failure test: replay every message
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` F3 system row. **Depends:** M3-T05.
 **Files:** `tests/Ledgerline.SystemTests/Harness/ReplayShovel.cs` (binds an exclusive queue with `#` to the three exchanges, re-publishes every message once with the same `messageId` and once with a new `messageId`), `ReplaySystemTests.cs`. Expose RabbitMQ port in the system test Compose project only.
@@ -669,7 +669,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T08: k6 library, smoke and steady scenarios
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 5. **Depends:** M2-T19.
 **Files:** `tests/k6/lib/{auth.js,api.js,setup.js,saga.js,thresholds.js}`, `tests/k6/{smoke.js,topup-steady.js,transfer-steady.js}`, `scripts/k6.sh` and `scripts/k6.ps1` (wrap the `docker run grafana/k6:2.4.0` command, write `--summary-export` to `docs/results/raw/<scenario>-<date>.json`). First confirm the k6 2.x script API for `http`, `scenarios`, `thresholds`, and custom `Trend` against the k6 documentation; adjust if 2.x changed them.
@@ -679,7 +679,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T09: k6 contention, mix, spike, outage scenarios and the monolith baseline
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 5; `when-monolith.md` (baseline). **Depends:** M3-T08.
 **Files:** `tests/k6/{transfer-hot-account.js,payment-mix.js,spike.js,broker-outage.js}`; `tests/Ledgerline.Accounts.IntegrationTests/Benchmarks/LocalTransferBaseline.cs` (a test, skipped unless `LEDGERLINE_BENCH=1`, that runs 10 000 transfers by calling `ILedger.PostAsync` directly in a transaction with 16 parallel workers and prints p50, p95, and transfers per second).
@@ -688,7 +688,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T10: Results write-up
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M3-T03, M3-T09.
 **Files:** Create `docs/results/k6-<yyyy-mm-dd>.md` (hardware, Docker limits, commit hash, one table per scenario: target, measured, pass or miss, and a short explanation for each miss), `docs/results/img/{dashboard.png,trace-topup.png}` (screenshots taken by the owner or by browser automation from Grafana); modify `README.md` ("Measurements" section: summary table, both images), `docs/when-monolith.md` (fill "to be measured" cells from the baseline and `transfer-steady`). If the hot-account scenario misses its target, add a section to ADR 0007 with the numbers and the decision (shard or accept), do not silently tune the target.
@@ -697,7 +697,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T11: CI security scans
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 4; ADR 0000 (action versions; verify `github/codeql-action` major). **Depends:** none.
 **Files:** Modify `.github/workflows/ci.yml` (job `security`: `actions/dependency-review-action@v5` on pull requests; step `dotnet list Ledgerline.slnx package --vulnerable --include-transitive` failing when the output contains `has the following vulnerable packages`; `gitleaks/gitleaks-action@v3`); create `.github/workflows/codeql.yml` (C#, manual build mode with `dotnet build`), `.github/dependabot.yml` (nuget, github-actions, docker; weekly), `.gitleaks.toml` (allowlist the documented development passwords in `compose.yaml`, `deploy/compose/**`, and the realm file by path and exact value; nothing broader).
@@ -707,7 +707,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T12: CI image scan, system tests, k6 smoke; remove the zero-test exemption
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `testing.md` section 4. **Depends:** M3-T06, M3-T08, M3-T11.
 **Files:** Modify `.github/workflows/ci.yml`: job `images` (main only: `docker compose --profile app build`, `aquasecurity/trivy-action@v0.36.0` per image, `severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`); job `system-tests` (main and `schedule` nightly: `LEDGERLINE_SYSTEM_TESTS=1`, upload `docker compose logs` as an artifact on failure); job `k6-smoke` (nightly). Modify `tests/Directory.Build.props`: remove the `--ignore-exit-code 8` line; delete or fill any test project that still has zero tests.
@@ -716,7 +716,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M3-T13: README for M3
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M3-T10, M3-T12.
 **Files:** Modify `README.md`: "Failure scenarios" section with a table (scenario, test name, level, link to the test file), CI badges, "Security scans" section listing the four scans and what each covers.
@@ -725,14 +725,14 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ## Milestone 3 checklist
 
-- [ ] Broker down: integration and system tests pass (M1-T11, M2-T17, M3-T06). **DoD: failure test 1**
-- [ ] Service crashes: integration and system tests pass (M1-T23, M2-T12, M3-T06). **DoD: failure test 2**
-- [ ] Message delivered twice: integration and system tests pass (M1-T08, M1-T16, M3-T07). **DoD: failure test 3**
-- [ ] Documented failure test inventory is enforced (M3-T04).
-- [ ] OpenTelemetry traces across services and a dashboard screenshot in the README (M3-T01, M3-T03, M3-T10). **DoD: traces and dashboard screenshot**
-- [ ] k6 results in the README with hardware and misses stated (M3-T10). **DoD: k6 results**
-- [ ] Tests and four security scans run in CI (M3-T11, M3-T12). **DoD: tests and security scans in CI**
-- [ ] `when-monolith.md` has measured numbers (M3-T10). **DoD: when monolith section**
+- [x] Broker down: integration and system tests pass (M1-T11, M2-T17, M3-T06). **DoD: failure test 1**
+- [x] Service crashes: integration and system tests pass (M1-T23, M2-T12, M3-T06). **DoD: failure test 2**
+- [x] Message delivered twice: integration and system tests pass (M1-T08, M1-T16, M3-T07). **DoD: failure test 3**
+- [x] Documented failure test inventory is enforced (M3-T04).
+- [x] OpenTelemetry traces across services and a dashboard screenshot in the README (M3-T01, M3-T03, M3-T10). **DoD: traces and dashboard screenshot**
+- [x] k6 results in the README with hardware and misses stated (M3-T10). **DoD: k6 results**
+- [x] Tests and four security scans run in CI (M3-T11, M3-T12). **DoD: tests and security scans in CI**
+- [x] `when-monolith.md` has measured numbers (M3-T10). **DoD: when monolith section**
 
 ---
 

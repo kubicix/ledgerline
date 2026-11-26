@@ -4,8 +4,6 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <!-- Skeleton only: empty test projects exit with code 8 (zero tests). Remove in plan task M3-T12. -->
-    <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --ignore-exit-code 8</TestingPlatformCommandLineArguments>
     <!-- Test names read as sentences with underscores. -->
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>

@@ -6,5 +6,9 @@
     <ProjectReference Include="../../src/Services/Notifications/Ledgerline.Notifications/Ledgerline.Notifications.csproj" />
     <ProjectReference Include="../../src/Services/BankSimulator/Ledgerline.BankSimulator/Ledgerline.BankSimulator.csproj" />
     <ProjectReference Include="../../src/Gateway/Ledgerline.Gateway/Ledgerline.Gateway.csproj" />
+    <ProjectReference Include="../Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests.csproj" />
+    <ProjectReference Include="../Ledgerline.Payments.IntegrationTests/Ledgerline.Payments.IntegrationTests.csproj" />
+    <ProjectReference Include="../Ledgerline.Accounts.IntegrationTests/Ledgerline.Accounts.IntegrationTests.csproj" />
+    <ProjectReference Include="../Ledgerline.Risk.IntegrationTests/Ledgerline.Risk.IntegrationTests.csproj" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,8 @@
 # Ledgerline
 
+[![ci](https://github.com/kubicix/ledgerline/actions/workflows/ci.yml/badge.svg)](https://github.com/kubicix/ledgerline/actions/workflows/ci.yml)
+[![codeql](https://github.com/kubicix/ledgerline/actions/workflows/codeql.yml/badge.svg)](https://github.com/kubicix/ledgerline/actions/workflows/codeql.yml)
+
 A payment and wallet backend built as .NET 10 microservices. An event-sourced
 double-entry ledger, payment sagas with bank compensation, Risk and email services
 communicate through RabbitMQ with a transactional outbox and inbox.
@@ -17,7 +20,7 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
-| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
+| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented and reviewed on branch `milestone-3`; not yet merged or pushed |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
@@ -63,6 +66,8 @@ readiness checks their own database and RabbitMQ connection.
 APIs validate Keycloak JWT bearer tokens with the `ledgerline-api` audience. POST
 requests require `Idempotency-Key`. The local realm seeds `alice` and `bob` as
 customers, `shop` as merchant, and `admin`; development passwords are `<name>_dev`.
+It also seeds the k6 load users `load-customer-001` to `load-customer-200` and
+`load-merchant-01` to `load-merchant-10`, with the same `<username>_dev` pattern.
 Smoke scripts obtain tokens through the development-only `ledgerline-k6` client and
 reuse stable idempotency keys so retained demo data can be checked repeatedly.
 
@@ -152,31 +157,84 @@ Payment flows: [docs/specs/payments.md](docs/specs/payments.md).
 
 ## Failure scenarios
 
-_Placeholder: filled in M3-T13 with links to the test files._
+Each scenario has deterministic integration tests that run on every push. The first
+three also have a system test that kills real containers; system tests run on `main`
+and nightly, and locally with `LEDGERLINE_SYSTEM_TESTS=1`. Tests that move money end
+with the ledger invariant check (trial balance zero in every currency). Steps and assertions
+per test: [docs/testing.md](docs/testing.md).
 
-| Scenario | Claim | Test | Level | Result |
-|---|---|---|---|---|
-| Broker down | Requests are accepted, nothing is lost, everything completes after recovery | TBD | integration, system | TBD |
-| Service crashes mid-flow | No lost or duplicated money; the flow finishes after restart | TBD | integration, system | TBD |
-| Message delivered twice | No second effect | TBD | integration, system | TBD |
-| Concurrent transfers on one account | No overdraft, no deadlock | TBD | integration | TBD |
+| Scenario | Test | Level | File |
+|---|---|---|---|
+| Broker down: outbox keeps messages and delivers once after recovery | `Outbox_keeps_messages_while_broker_is_down_and_delivers_after_recovery` | integration | [FailureScenarioTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs) |
+| Broker down: top-ups accepted during the outage complete afterwards | `Topups_accepted_during_broker_outage_complete_after_recovery` | integration | [TimeoutTests.cs](tests/Ledgerline.Payments.IntegrationTests/TimeoutTests.cs) |
+| Broker down: RabbitMQ stopped under 50 top-ups and 50 transfers | `Broker_outage_loses_no_money` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Crash after ledger commit, before ack | `Crash_after_ledger_commit_before_ack_does_not_double_post` | integration | [CrashTests.cs](tests/Ledgerline.Accounts.IntegrationTests/CrashTests.cs) |
+| Crash after saga transition commit | `Crash_after_saga_transition_commit_resumes_from_outbox` | integration | [CrashTests.cs](tests/Ledgerline.Payments.IntegrationTests/CrashTests.cs) |
+| Crash after bank capture, before commit | `Crash_after_bank_capture_before_commit_does_not_capture_twice` | integration | [BankCallTests.cs](tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs) |
+| Crash after publish, before the outbox row is marked processed | `Crash_after_publish_before_marking_processed_republishes_and_consumer_deduplicates` | integration | [FailureScenarioTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/FailureScenarioTests.cs) |
+| Payments killed with 100 top-ups in flight | `Killing_payments_mid_saga_completes_after_restart` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Accounts killed during 200 transfers | `Killing_accounts_mid_posting_completes_after_restart` | system | [FailureSystemTests.cs](tests/Ledgerline.SystemTests/FailureSystemTests.cs) |
+| Same message delivered twice | `Same_message_delivered_twice_is_handled_once` | integration | [ConsumerTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/ConsumerTests.cs) |
+| Same message delivered to two consumers at once | `Same_message_delivered_concurrently_to_two_consumers_is_handled_once` | integration | [ConsumerTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/ConsumerTests.cs) |
+| Same operation with a new message id | `Same_operation_with_new_message_id_returns_same_reply_without_second_entry` | integration | [LedgerCommandTests.cs](tests/Ledgerline.Accounts.IntegrationTests/LedgerCommandTests.cs) |
+| Duplicate and late saga replies | `Duplicate_and_late_replies_do_not_move_a_final_payment` | integration | [TransferFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TransferFlowTests.cs) |
+| Every message replayed during a mixed workload | `Replaying_every_message_changes_nothing` | system | [ReplaySystemTests.cs](tests/Ledgerline.SystemTests/ReplaySystemTests.cs) |
+| 50 concurrent debits on one account | `Concurrent_debits_never_overdraw` | integration | [ConcurrencyTests.cs](tests/Ledgerline.Accounts.IntegrationTests/ConcurrencyTests.cs) |
+| Opposite-direction transfers | `Opposite_direction_transfers_do_not_deadlock` | integration | [ConcurrencyTests.cs](tests/Ledgerline.Accounts.IntegrationTests/ConcurrencyTests.cs) |
+| Concurrent capture and void of one payment | `Capture_and_void_race_has_exactly_one_winner` | integration | [MerchantPaymentFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/MerchantPaymentFlowTests.cs) |
+| Same idempotency key sent concurrently | `Same_idempotency_key_sent_concurrently_creates_one_payment` | integration | [PaymentsApiTests.cs](tests/Ledgerline.Payments.IntegrationTests/PaymentsApiTests.cs) |
+| Poison message | `Poison_message_goes_to_dead_queue_after_max_attempts` | integration | [RetryAndDeadLetterTests.cs](tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/RetryAndDeadLetterTests.cs) |
+| Bank times out after succeeding | `Bank_timeout_with_success_is_resolved_by_lookup` | integration | [BankCallTests.cs](tests/Ledgerline.Payments.IntegrationTests/BankCallTests.cs) |
+| Ledger rejects after the bank captured | `Ledger_rejection_after_bank_capture_refunds_at_bank` | integration | [TopUpFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs) |
+| Compensation exhausted | `Exhausted_compensation_ends_in_manual_review` | integration | [TopUpFlowTests.cs](tests/Ledgerline.Payments.IntegrationTests/TopUpFlowTests.cs) |
 
-How the tests work: [docs/testing.md](docs/testing.md).
+The table lists the main tests per scenario; the full list is in
+[docs/testing.md](docs/testing.md). Load results, including the misses, are under
+[Measurements](#measurements).
 
 ## Measurements
 
-_Placeholder: filled in M3-T10. Numbers will come with hardware, commit, and misses._
+Seven k6 scenarios ran through the gateway against the Compose stack on one desktop PC:
+AMD Ryzen 5 7500F (6 cores, 12 threads), 32 GB RAM, a DRAM-less 1 TB NVMe, Docker Desktop
+on WSL2 with its defaults (12 CPUs, 15.5 GiB), one replica of every service, the scripts of commit
+`d165fea`. The load generator ran on the same machine, so **these are not capacity
+numbers**. Hardware, method, per-threshold tables and every miss are in
+[docs/results/k6-2026-11-26.md](docs/results/k6-2026-11-26.md).
 
 | Scenario | Load | p95 accept | p95 saga completion | Errors | Target met |
 |---|---|---|---|---|---|
-| Transfers, steady | TBD | TBD | TBD | TBD | TBD |
-| Top-ups, steady | TBD | TBD | TBD | TBD | TBD |
-| Hot account | TBD | TBD | TBD | TBD | TBD |
-| Spike | TBD | TBD | TBD | TBD | TBD |
+| Smoke | 5 users, 60 s | 30.31 ms | top-up 1.57 s, transfer 0.97 s | 0 % | Yes in 1 of 4 runs (see results) |
+| Transfers, steady | 100/s offered, 13.5/s sent (k6 VU ceiling) | 252.12 ms | 30 s timeout (server side 174.9 s) | 0 % | No |
+| Top-ups, steady | 50/s offered, 10.1/s sent (k6 VU ceiling) | 359.44 ms | 30 s timeout (server side 196.2 s) | 0 % | No |
+| Hot account | 100/s offered, 13.5/s sent (k6 VU ceiling) | 467.57 ms | 30 s timeout (server side 218 s) | 0 % | No |
+| Payment mix | 50/s offered, 13.3/s sent (k6 VU ceiling) | 624.90 ms | 30 s timeout | 0 % | No |
+| Spike | 20 to 300/s | 233.43 ms | 120 s probe timeout | 0 % | No |
+| Broker outage | 50/s, RabbitMQ stopped 30 s, all accepted | 119.7 ms | 150 s probe timeout; recovery at least 148 s against 60 s | 0 % | Acceptance yes, recovery no |
 
-_Placeholder: Grafana dashboard screenshot (`docs/results/img/dashboard.png`)._
+What held in every run: no lost or duplicated money (trial balance 0 in every currency),
+no payment in `ManualReview`, every outbox row relayed, and every accepted
+payment reached a final state once the backlog drained. What missed: latency and
+throughput. The stack completed about 2 to 6 sagas per second during the load, and k6 could send only
+10 to 13.5 per second of the 50 to 100 offered because every VU was waiting on a slow
+saga. Three measured reasons: the disk behind Docker Desktop stalls for about 17 s every
+55 to 90 s under the fsync load of commits and broker confirms; the outbox relay
+publishes and confirms one message at a time, so Payments' outbox lag p95 reached 61 to
+96 s; and k6's 100 ms status polling (about 1 300 to 2 000 requests per second) ran on
+the same CPU. The same transfer as one local transaction, without the broker, ran at 472
+to 1 032 per second with a p95 of 23.72 to 67.09 ms. The hot-account result and the
+decision not to shard are in [ADR 0007](docs/adr/0007-event-sourcing-scope.md).
 
-_Placeholder: one top-up trace across five services (`docs/results/img/trace-topup.png`)._
+The provisioned Grafana dashboard during the top-up load run. Panels hold only about the first
+40 s of the load because the OpenTelemetry collector in the dev telemetry container
+ran out of memory (see the results page):
+
+![Ledgerline Grafana dashboard during the topup-steady run](docs/results/img/dashboard.png)
+
+One top-up traced from the HTTP request through the outbox and RabbitMQ across six
+services (gateway, Payments, Risk, BankSimulator, Accounts, Notifications); database
+spans are filtered out:
+
+![Tempo trace of one top-up](docs/results/img/trace-topup.png)
 
 ## Run on Kubernetes
 
@@ -192,8 +250,19 @@ _Placeholder: filled in M6-T06._
 
 ## Security scans in CI
 
-_Placeholder: filled in M3-T13 (dependency review, vulnerable packages, secret scan,
-static analysis, image scan)._
+The `security` and `images` jobs in [ci.yml](.github/workflows/ci.yml) and the
+[codeql.yml](.github/workflows/codeql.yml) workflow run these scans:
+
+| Scan | Covers | Runs |
+|---|---|---|
+| Dependency review (`actions/dependency-review-action`) | Dependencies added or changed in a pull request: known vulnerabilities and licenses | Pull requests |
+| Vulnerable NuGet packages (`dotnet list package --vulnerable --include-transitive`) | Direct and transitive packages of the whole solution; any hit fails the job | Push to `main`, pull requests, nightly |
+| Secret scan (gitleaks, [.gitleaks.toml](.gitleaks.toml)) | Committed secrets: the pull request's commits on pull requests, the pushed commits on push, the full git history on the nightly run | Push to `main`, pull requests, nightly |
+| Static analysis (CodeQL, C#) | Code-level vulnerabilities in the source, using a manual build | Push to `main`, pull requests |
+| Image scan (Trivy) | Fixed HIGH and CRITICAL vulnerabilities in the six service images | Push to `main` |
+
+On a private repository, dependency review and the CodeQL result upload need GitHub
+Advanced Security. The scans are meant to run unchanged once the repository is public.
 
 ## When would I build this as a monolith?
 

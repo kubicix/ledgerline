@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Ledgerline.Accounts.Infrastructure;
 using Ledgerline.Accounts.Infrastructure.Entities;
 using Ledgerline.Accounts.Ledger;
@@ -8,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.Accounts.Features.LedgerCommands;
 
-public sealed class LedgerOperationRunner(AccountsDbContext db, ILedger ledger, IOutbox outbox, IClock clock, ICrashPoint crashPoint) : IPostCommitHook
+public sealed class LedgerOperationRunner(AccountsDbContext db, ILedger ledger, IOutbox outbox, IClock clock, ICrashPoint crashPoint,
+    LedgerMetrics metrics) : IPostCommitHook
 {
     private bool handled;
 
@@ -26,7 +28,16 @@ public sealed class LedgerOperationRunner(AccountsDbContext db, ILedger ledger, 
             handled = true;
             return;
         }
-        var result = await execute();
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "Failed";
+        PostingResult result;
+        try
+        {
+            result = await execute();
+            outcome = result is PostingResult.Posted ? "Succeeded" : "Rejected";
+        }
+        // Recorded also when the posting throws (deadlock, serialization failure, timeout): that tail is what the metric is for.
+        finally { metrics.RecordPosting(Stopwatch.GetElapsedTime(started), kind.ToString(), outcome); }
         var operation = new LedgerOperation
         {
             OperationId = operationId, PaymentId = paymentId, Kind = kind.ToString(), CompletedAt = clock.UtcNow,

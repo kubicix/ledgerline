@@ -70,6 +70,39 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
     }
 
     [Fact]
+    public async Task Relay_does_not_publish_past_a_head_row_that_is_not_yet_due()
+    {
+        var cs = await CreateDatabaseAsync();
+        await SeedAsync(cs, 5);
+        await using (var db = OpenDb(cs))
+        {
+            // Due times come from the DB clock; the head is due later than DB now but earlier than the app clock.
+            await db.Database.ExecuteSqlAsync($"""
+                UPDATE outbox_messages SET next_attempt_at = CASE WHEN sequence = (SELECT min(sequence) FROM outbox_messages)
+                    THEN now() + interval '30 minutes' ELSE now() - interval '1 minute' END
+                """, TestContext.Current.CancellationToken);
+        }
+        var publisher = new ControlledPublisher((_, _) => false);
+        var batches = new BatchObserver();
+        using var host = CreateHost(cs, publisher, observer: batches, clock: new AheadClock());
+        await host.StartAsync(TestContext.Current.CancellationToken);
+        // A third relay transaction means at least two full batches have finished.
+        await Eventually.ShouldAsync(() => Task.FromResult(batches.Started >= 3));
+        publisher.Calls.ShouldBeEmpty();
+        await using (var db = OpenDb(cs))
+        {
+            await db.Database.ExecuteSqlAsync($"""
+                UPDATE outbox_messages SET next_attempt_at = now() - interval '1 second'
+                WHERE sequence = (SELECT min(sequence) FROM outbox_messages)
+                """, TestContext.Current.CancellationToken);
+        }
+        await Eventually.ShouldAsync(async () => await ProcessedAsync(cs) == 5);
+        await host.StopAsync(TestContext.Current.CancellationToken);
+        var first = await FirstSequenceAsync(cs);
+        publisher.Calls.ShouldBe(Enumerable.Range(0, 5).Select(i => first + i));
+    }
+
+    [Fact]
     public async Task Two_relays_do_not_publish_the_same_row_twice()
     {
         var cs = await CreateDatabaseAsync();
@@ -134,12 +167,13 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
         (await signal.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeFalse();
     }
 
-    private IHost CreateHost(string cs, IOutboxPublisher? publisher = null, int pollMs = 10, ScanObserver? observer = null)
+    private IHost CreateHost(string cs, IOutboxPublisher? publisher = null, int pollMs = 10, IInterceptor? observer = null,
+        IClock? clock = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(new OutboxSignal());
         builder.Services.AddSingleton(new RelayOptions { PollIntervalMs = pollMs, BatchSize = 100 });
-        builder.Services.AddSingleton<IClock, SystemClock>();
+        builder.Services.AddSingleton(clock ?? new SystemClock());
         builder.Services.AddSingleton<ICrashPoint, NoCrashPoint>();
         builder.Services.AddScoped<OutboxSaveChangesInterceptor>();
         builder.Services.AddDbContext<TestDbContext>((sp, options) =>
@@ -178,6 +212,12 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
         return await db.Set<OutboxMessage>().CountAsync(x => x.ProcessedAt != null, TestContext.Current.CancellationToken);
     }
 
+    private static async Task<long> FirstSequenceAsync(string cs)
+    {
+        await using var db = OpenDb(cs);
+        return await db.Set<OutboxMessage>().MinAsync(x => x.Sequence, TestContext.Current.CancellationToken);
+    }
+
     private static MessageEnvelope[] Recorded(BrokerProbe probe) => probe.Messages.Where(m => m.Type == "relay.event.recorded.v1").ToArray();
 
     private static async Task BarrierAsync(BrokerProbe probe)
@@ -213,6 +253,23 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
             if (command.CommandText.Contains("SKIP LOCKED", StringComparison.Ordinal)) Scanned.TrySetResult();
             return ValueTask.FromResult(result);
         }
+    }
+
+    private sealed class BatchObserver : DbTransactionInterceptor
+    {
+        private int started;
+        public int Started => Volatile.Read(ref started);
+        public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection, TransactionEndEventData eventData,
+            DbTransaction result, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref started);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class AheadClock : IClock
+    {
+        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow.AddHours(1);
     }
 
     [MessageType("relay.event.recorded.v1")]

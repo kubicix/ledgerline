@@ -5,6 +5,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="Npgsql.OpenTelemetry" />
     <ProjectReference Include="../Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
   </ItemGroup>
 </Project>

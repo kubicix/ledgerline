@@ -4,12 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 2 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,3 +31,163 @@ jobs:
         run: dotnet test --solution Ledgerline.slnx --no-build -c Release
       - name: Validate Compose file
         run: docker compose config --quiet
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore Ledgerline.slnx
+      - name: Vulnerable packages
+        run: |
+          dotnet list Ledgerline.slnx package --vulnerable --include-transitive > vulnerable.txt 2>&1
+          cat vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "::error::Vulnerable NuGet packages found"
+            exit 1
+          fi
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_ENABLE_COMMENTS: false
+      - name: Dependency review
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v5
+
+  images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build service images
+        id: build
+        run: docker compose --profile app build
+      - name: Trivy ledgerline-accounts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-accounts:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-payments
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-payments:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-risk
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-risk:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-notifications
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-notifications:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-banksim
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-banksim:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-gateway
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-gateway:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  system-tests:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LEDGERLINE_SYSTEM_TESTS: '1'
+      # The harness starts project ledgerline-systest itself; keep it up after the run so its logs can be collected.
+      LEDGERLINE_SYSTEM_TESTS_KEEP: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: System tests
+        timeout-minutes: 25
+        run: dotnet test --project tests/Ledgerline.SystemTests
+      - name: Collect container logs
+        if: failure() || cancelled()
+        run: docker compose -p ledgerline-systest --profile app logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+      - name: Upload container logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-tests-compose-logs
+          path: |
+            compose-logs.txt
+            tests/Ledgerline.SystemTests/bin/**/compose-logs/
+          if-no-files-found: ignore
+
+  k6-smoke:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start stack
+        timeout-minutes: 17
+        run: docker compose --profile app up -d --build --wait --wait-timeout 900
+      - name: Smoke scenario
+        timeout-minutes: 15
+        run: |
+          # Only this run's summary is uploaded, not the committed ones.
+          rm -f docs/results/raw/smoke-*.json
+          ./scripts/k6.sh smoke
+      - name: Upload summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-smoke-summary
+          path: docs/results/raw/smoke-*.json
+          if-no-files-found: ignore
+      - name: Collect container logs
+        if: failure() || cancelled()
+        run: docker compose --profile app logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+      - name: Upload container logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-smoke-compose-logs
+          path: compose-logs.txt
+          if-no-files-found: ignore
