@@ -80,7 +80,7 @@ The hot row was not the binding limit: after the load stopped, the backlog drain
 postings per second, faster than the whole pipeline completed transfers during either run. The lower completion rate
 during the hot-account load is a single run on a disk whose stall windows vary run to run, so it does not isolate
 row-lock contention either. One more confounder: the OpenTelemetry collector in the telemetry container ran out of
-memory under load in the transfer-steady run (and, in a retry with a 6 GiB limit, used 6 to 7 cores' worth of CPU
+memory under load in the transfer-steady run (and, in a retry with a 6 GiB limit, used about 6 to 7 cores (580-720 %) worth of CPU
 near its limit). Whether the same happened in the hot-account run is unknown, so the two runs may have had different
 CPU competition.
 

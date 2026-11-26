@@ -20,7 +20,7 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
-| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Not started |
+| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented and reviewed on branch `milestone-3`; not yet merged or pushed |
 | M4 | Kubernetes with Helm and health checks | Not started |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
@@ -66,6 +66,8 @@ readiness checks their own database and RabbitMQ connection.
 APIs validate Keycloak JWT bearer tokens with the `ledgerline-api` audience. POST
 requests require `Idempotency-Key`. The local realm seeds `alice` and `bob` as
 customers, `shop` as merchant, and `admin`; development passwords are `<name>_dev`.
+It also seeds the k6 load users `load-customer-001` to `load-customer-200` and
+`load-merchant-01` to `load-merchant-10`, with the same `<username>_dev` pattern.
 Smoke scripts obtain tokens through the development-only `ledgerline-k6` client and
 reuse stable idempotency keys so retained demo data can be checked repeatedly.
 
@@ -255,7 +257,7 @@ The `security` and `images` jobs in [ci.yml](.github/workflows/ci.yml) and the
 |---|---|---|
 | Dependency review (`actions/dependency-review-action`) | Dependencies added or changed in a pull request: known vulnerabilities and licenses | Pull requests |
 | Vulnerable NuGet packages (`dotnet list package --vulnerable --include-transitive`) | Direct and transitive packages of the whole solution; any hit fails the job | Push to `main`, pull requests, nightly |
-| Secret scan (gitleaks, [.gitleaks.toml](.gitleaks.toml)) | Committed secrets across the full git history | Push to `main`, pull requests, nightly |
+| Secret scan (gitleaks, [.gitleaks.toml](.gitleaks.toml)) | Committed secrets: the pull request's commits on pull requests, the pushed commits on push, the full git history on the nightly run | Push to `main`, pull requests, nightly |
 | Static analysis (CodeQL, C#) | Code-level vulnerabilities in the source, using a manual build | Push to `main`, pull requests |
 | Image scan (Trivy) | Fixed HIGH and CRITICAL vulnerabilities in the six service images | Push to `main` |
 

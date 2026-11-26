@@ -27,5 +27,5 @@ paths = [
   '''^deploy/compose/keycloak/ledgerline-realm\.json$''',
 ]
 regexes = [
-  '''^(alice|bob|shop|admin|load-customer-\d{3}|load-merchant-\d{2})_dev$''',
+  '''^(alice|bob|shop|admin|load-customer-(00[1-9]|0[1-9]\d|1\d\d|200)|load-merchant-(0[1-9]|10))_dev$''',
 ]

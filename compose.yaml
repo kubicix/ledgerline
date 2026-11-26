@@ -307,8 +307,8 @@ services:
     image: grafana/otel-lgtm:0.41.0
     # No swap for this container (memswap_limit equal to mem_limit). Without it the memory reclaim of the
     # Docker Desktop VM pushed about 200 MB of the in-memory telemetry below to the swap disk per load run, which sits
-    # on the same physical drive. 4 GiB covers the 2 GiB of tmpfs caps plus about 1.5 GiB of process memory measured
-    # under load; above that the kernel kills a process in this container only.
+    # on the same physical drive. The cap bounds the container; under steady load the collector exceeds it and is
+    # OOM-killed (see "Telemetry under load" in docs/results/k6-2026-11-26.md).
     mem_limit: 4g
     memswap_limit: 4g
     ports:
