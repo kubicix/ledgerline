@@ -1,7 +1,13 @@
 {{- /*
 RabbitMQ (compose.yaml: rabbitmq). A StatefulSet with a PVC: the node name derives from the pod name, which is stable,
 so the quorum queues find their data again after a restart. The services declare their own exchanges and queues at
-startup (BuildingBlocks Topology), so the Compose-only rabbitmq-init job and its local.events queue are not needed.
+startup (BuildingBlocks Topology). The rabbitmq-definitions Job below is the Compose rabbitmq-init job: it imports
+files/local-events.json (a copy of deploy/compose/rabbitmq/local-events.json), whose local.events queue is the only
+binding for accounts.event.journal-entry-posted.v1. Without it the Accounts relay publishes that event unroutable,
+retries it and holds back every later Accounts message. The Job is a pre-install,pre-upgrade hook with a weight below
+the migration Jobs, so it runs before any service of the upgrade starts; like them it reads only what the
+infrastructure-only pass also renders (rabbitmq-secrets and the rabbitmq-definitions ConfigMap). Importing the file at
+node boot instead (definitions.local.path) would skip creating the default user.
 */ -}}
 {{- $mq := .Values.infra.rabbitmq }}
 {{- if $mq.enabled }}
@@ -16,6 +22,16 @@ type: Opaque
 stringData:
   RABBITMQ_DEFAULT_USER: {{ $mq.user | quote }}
   RABBITMQ_DEFAULT_PASS: {{ $mq.password | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-definitions
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+data:
+  local-events.json: |
+    {{- .Files.Get "files/local-events.json" | nindent 4 }}
 ---
 apiVersion: v1
 kind: Service
@@ -103,4 +119,64 @@ spec:
         resources:
           requests:
             storage: {{ $mq.storage }}
+{{- if not .Values.infraOnly }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rabbitmq-definitions
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq-definitions" "root" $) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      # Labelled rabbitmq-definitions, so the rabbitmq Service and StatefulSet selectors never match this pod.
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "rabbitmq-definitions" "root" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $mq.runAsUser | nindent 8 }}
+      containers:
+        - name: import
+          image: {{ $mq.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["rabbitmqadmin", "definitions", "import", "--file", "/etc/ledgerline/rabbitmq/local-events.json"]
+          env:
+            - name: RABBITMQADMIN_TARGET_HOST
+              value: rabbitmq
+            - name: RABBITMQADMIN_NON_INTERACTIVE_MODE
+              value: "true"
+            - name: RABBITMQADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_DEFAULT_PASS
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: definitions
+              mountPath: /etc/ledgerline/rabbitmq
+              readOnly: true
+      volumes:
+        - name: definitions
+          configMap:
+            name: rabbitmq-definitions
+{{- end }}
 {{- end }}

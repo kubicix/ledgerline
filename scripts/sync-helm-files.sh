@@ -16,6 +16,7 @@ pairs=(
   "deploy/compose/keycloak/ledgerline-realm.json|ledgerline-realm.json"
   "deploy/observability/dashboards/ledgerline-overview.json|ledgerline-overview.json"
   "deploy/observability/provisioning/dashboards.yaml|dashboards.yaml"
+  "deploy/compose/rabbitmq/local-events.json|local-events.json"
 )
 
 mkdir -p "$chart_files"

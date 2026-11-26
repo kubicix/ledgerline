@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Usage: scripts/smoke.sh [gateway base URL] [Keycloak realm URL]
+# A positional argument wins over GATEWAY_URL or KEYCLOAK_URL; without either the Compose defaults below apply.
 
-gateway_url="${GATEWAY_URL:-http://localhost:8080}"
+gateway_url="${1:-${GATEWAY_URL:-http://localhost:8080}}"
 accounts_url="$gateway_url/api"
 payments_url="$gateway_url/api"
-keycloak_url="${KEYCLOAK_URL:-http://localhost:8081/realms/ledgerline}"
+keycloak_url="${2:-${KEYCLOAK_URL:-http://localhost:8081/realms/ledgerline}}"
 mailpit_url="${MAILPIT_URL:-http://localhost:8025}"
 response_file="$(mktemp)"
 trap 'rm -f "$response_file"' EXIT

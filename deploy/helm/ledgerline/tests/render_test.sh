@@ -210,7 +210,7 @@ fi
 
 # ---- Migration Jobs (M4-T04, section 0.1 C1) -------------------------------------------------------
 MIGRATE_SERVICES="accounts payments risk notifications banksim"
-JOB_COUNT="$(grep -c '^Job ' "$WORK/default.list")"
+JOB_COUNT="$(grep -c '^Job .*-migrate$' "$WORK/default.list")"
 [ "$JOB_COUNT" -eq 5 ] || fail "expected 5 migration Jobs, found $JOB_COUNT"
 for svc in $MIGRATE_SERVICES; do
   check "Job $svc-migrate is rendered" grep -qx "Job $svc-migrate" "$WORK/default.list"
@@ -219,6 +219,7 @@ grep -q '^Job gateway' "$WORK/default.list" && fail "the gateway must not have a
 for f in "$WORK"/default/doc*.yaml; do
   [ "$(doc_kind "$f")" = "Job" ] || continue
   j="$(doc_name "$f")"
+  case "$j" in *-migrate) ;; *) continue ;; esac
   svc="${j%-migrate}"
   grep -Eq '"?helm.sh/hook"?: "?pre-install,pre-upgrade"?$' "$f" || fail "$j: hook must be pre-install,pre-upgrade"
   grep -Eq '"?helm.sh/hook-delete-policy"?: "?before-hook-creation,hook-succeeded"?$' "$f" \
@@ -258,7 +259,7 @@ done
 if helm_render "$WORK/nomig.yaml" --set services.risk.migrate=false; then
   split_docs "$WORK/nomig.yaml" "$WORK/nomig"
   list_docs "$WORK/nomig" >"$WORK/nomig.list"
-  [ "$(grep -c '^Job ' "$WORK/nomig.list")" -eq 4 ] || fail "risk.migrate=false: expected 4 migration Jobs"
+  [ "$(grep -c '^Job .*-migrate$' "$WORK/nomig.list")" -eq 4 ] || fail "risk.migrate=false: expected 4 migration Jobs"
   grep -qx 'Job risk-migrate' "$WORK/nomig.list" && fail "risk.migrate=false: Job risk-migrate must not render"
 else
   cat "$WORK/nomig.yaml.err" >&2
@@ -279,7 +280,8 @@ if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
     grep -qx "Secret $svc-secrets" "$WORK/infra.list" || fail "infraOnly: Secret $svc-secrets must still render"
   done
 
-  # Every Secret and ConfigMap a migration Job references must exist in the infrastructure-only render.
+  # Every Secret and ConfigMap a hook Job (5 migration Jobs and rabbitmq-definitions) references must exist in the
+  # infrastructure-only render.
   # Self-check of the extractor on a Deployment, which uses envFrom the same way a Job does.
   self="$(referenced_names "$(find_doc "$WORK/default" Deployment accounts)" | sort | tr '\n' ' ')"
   case "$self" in
@@ -292,12 +294,12 @@ if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
     j="$(doc_name "$f")"
     JOBS_CHECKED=$((JOBS_CHECKED + 1))
     refs="$(referenced_names "$f")"
-    [ -n "$refs" ] || fail "reference extractor found nothing in migration Job $j"
+    [ -n "$refs" ] || fail "reference extractor found nothing in hook Job $j"
     for ref in $refs; do
-      grep -Eqx "(Secret|ConfigMap) $ref" "$WORK/infra.list" || fail "migration Job $j references $ref, which infraOnly does not render"
+      grep -Eqx "(Secret|ConfigMap) $ref" "$WORK/infra.list" || fail "hook Job $j references $ref, which infraOnly does not render"
     done
   done
-  [ "$JOBS_CHECKED" -eq 5 ] || fail "infraOnly reference check must see 5 migration Jobs, saw $JOBS_CHECKED"
+  [ "$JOBS_CHECKED" -eq 6 ] || fail "infraOnly reference check must see 6 hook Jobs, saw $JOBS_CHECKED"
 else
   cat "$WORK/infra.yaml.err" >&2
   fail "helm template --set infraOnly=true failed"
@@ -312,6 +314,7 @@ deploy/compose/postgres/init-databases.sql|files/init-databases.sql
 deploy/compose/keycloak/ledgerline-realm.json|files/ledgerline-realm.json
 deploy/observability/dashboards/ledgerline-overview.json|files/ledgerline-overview.json
 deploy/observability/provisioning/dashboards.yaml|files/dashboards.yaml
+deploy/compose/rabbitmq/local-events.json|files/local-events.json
 "
 for pair in $SYNC_PAIRS; do
   src="${pair%%|*}"; dst="${pair##*|}"
@@ -524,7 +527,7 @@ if helm_render "$WORK/nopg.yaml" --set infra.postgres.enabled=false; then
   for n in rabbitmq redis keycloak otel-lgtm mailpit; do
     grep -Eq "^(StatefulSet|Deployment) $n\$" "$WORK/nopg.list" || fail "infra.postgres.enabled=false: $n must still render"
   done
-  [ "$(grep -c '^Job ' "$WORK/nopg.list")" -eq 5 ] || fail "infra.postgres.enabled=false: migration Jobs must still render (external database)"
+  [ "$(grep -c '^Job .*-migrate$' "$WORK/nopg.list")" -eq 5 ] || fail "infra.postgres.enabled=false: migration Jobs must still render (external database)"
 else
   cat "$WORK/nopg.yaml.err" >&2
   fail "helm template --set infra.postgres.enabled=false failed"
@@ -543,6 +546,41 @@ else
   cat "$WORK/noinfra.yaml.err" >&2
   fail "helm template with all infrastructure disabled failed"
 fi
+
+# RabbitMQ definitions (compose.yaml: rabbitmq-init). The local.events queue is bound to
+# accounts.event.journal-entry-posted.v1, which no service consumes; without the binding the Accounts relay publishes
+# that event unroutable, retries it and holds back every later message (found on the first kind deploy, M4-T06).
+if f="$(find_doc "$WORK/default" Job rabbitmq-definitions)"; then
+  grep -Eq '"?helm.sh/hook"?: "?pre-install,pre-upgrade"?$' "$f" || fail "rabbitmq-definitions: hook must be pre-install,pre-upgrade"
+  grep -Eq '"?helm.sh/hook-delete-policy"?: "?before-hook-creation,hook-succeeded"?$' "$f" \
+    || fail "rabbitmq-definitions: hook-delete-policy must be before-hook-creation,hook-succeeded"
+  grep -Eq '"?helm.sh/hook-weight"?: "?-1"?$' "$f" || fail "rabbitmq-definitions: hook-weight must be -1 (before the migrations)"
+  grep -q '^  backoffLimit: 6$' "$f" || fail "rabbitmq-definitions: backoffLimit must be 6"
+  grep -q 'restartPolicy: Never$' "$f" || fail "rabbitmq-definitions: restartPolicy must be Never"
+  grep -Eq 'image: "?rabbitmq:4.4-management"?$' "$f" || fail "rabbitmq-definitions: image must be infra.rabbitmq.image"
+  grep -q 'rabbitmqadmin' "$f" && grep -q 'definitions' "$f" && grep -q 'import' "$f" \
+    || fail "rabbitmq-definitions: must run rabbitmqadmin definitions import"
+  grep -Eq "^ *app.kubernetes.io/name: rabbitmq\$" "$f" && fail "rabbitmq-definitions: pod labels must not match the rabbitmq selector"
+  env="$(block "$f" env)"
+  grep -q 'name: RABBITMQADMIN_TARGET_HOST' <<<"$env" || fail "rabbitmq-definitions: RABBITMQADMIN_TARGET_HOST missing"
+  grep -q 'key: RABBITMQ_DEFAULT_USER' <<<"$env" || fail "rabbitmq-definitions: user must come from rabbitmq-secrets"
+  grep -q 'key: RABBITMQ_DEFAULT_PASS' <<<"$env" || fail "rabbitmq-definitions: password must come from rabbitmq-secrets"
+  grep -q 'name: rabbitmq-secrets' <<<"$env" || fail "rabbitmq-definitions: credentials must come from rabbitmq-secrets"
+  grep -q 'name: rabbitmq-definitions' "$f" || fail "rabbitmq-definitions: ConfigMap rabbitmq-definitions not mounted"
+  grep -q 'runAsNonRoot: true' "$f" || fail "rabbitmq-definitions: runAsNonRoot must be true"
+  grep -q 'allowPrivilegeEscalation: false' "$f" || fail "rabbitmq-definitions: allowPrivilegeEscalation must be false"
+  grep -q -- '- ALL' "$f" || fail "rabbitmq-definitions: must drop ALL capabilities"
+  grep -q '^ *limits:' "$f" || fail "rabbitmq-definitions: resource limits missing"
+else
+  fail "Job rabbitmq-definitions is not rendered"
+fi
+if f="$(find_doc "$WORK/infra" ConfigMap rabbitmq-definitions)"; then
+  grep -q '"local.events"' "$f" || fail "ConfigMap rabbitmq-definitions must declare local.events"
+  grep -q 'accounts.event.journal-entry-posted.v1' "$f" || fail "ConfigMap rabbitmq-definitions must bind journal-entry-posted"
+else
+  fail "infraOnly: ConfigMap rabbitmq-definitions must render"
+fi
+grep -qx 'Job rabbitmq-definitions' "$WORK/nopg.list" || fail "infra.postgres.enabled=false: Job rabbitmq-definitions must still render"
 
 # The infrastructure renders in the infrastructure-only pass too.
 for n in postgres rabbitmq; do

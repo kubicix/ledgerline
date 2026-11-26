@@ -789,7 +789,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T06: One command on Kubernetes and smoke
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T02, M4-T04, M4-T05.
 **Files:** Create `scripts/kind-deploy.sh` and `.ps1` (build images with `docker compose --profile app build`, `kind load docker-image` each, `helm upgrade --install ledgerline deploy/helm/ledgerline --wait --timeout 10m`), modify `scripts/smoke.*` to take the base URL and Keycloak URL as arguments. Keycloak issuer: tokens are requested from inside the cluster's point of view and validated by services with the in-cluster authority; set `KC_HOSTNAME` so that the issuer is the same string for the smoke script and the services (document the chosen approach in `docs/kubernetes.md`).

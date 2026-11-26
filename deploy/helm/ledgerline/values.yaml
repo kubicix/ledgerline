@@ -145,6 +145,8 @@ infra:
       limits:
         memory: 1Gi
 
+  # With enabled=false an external broker needs what files/local-events.json declares (the local.events queue bound to
+  # accounts.event.journal-entry-posted.v1), or the Accounts relay stalls on that unroutable event.
   rabbitmq:
     enabled: true
     image: rabbitmq:4.4-management
