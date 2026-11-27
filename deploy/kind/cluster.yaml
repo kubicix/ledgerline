@@ -1,0 +1,24 @@
+# kind cluster for Ledgerline (ADR 0011). One control-plane node; the node image is kind's default for the pinned
+# kind release (ADR 0000). Host ports match the Compose stack, so only one of the two can run at a time.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ledgerline
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Gateway (the only public entry for the API)
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Keycloak, so tokens obtained at localhost:8081 carry the same issuer the services use
+      - containerPort: 30081
+        hostPort: 8081
+        protocol: TCP
+      # Grafana (LGTM)
+      - containerPort: 30300
+        hostPort: 3000
+        protocol: TCP
+      # Mailpit web UI
+      - containerPort: 30025
+        hostPort: 8025
+        protocol: TCP

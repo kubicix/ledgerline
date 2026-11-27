@@ -1,0 +1,84 @@
+{{- /*
+One migration Job per service with migrate: true (ADR 0011, design.md section 11). It runs the service image with
+the migrate argument as a pre-install and pre-upgrade hook, so it runs before any regular resource of the release is
+created or updated. It may therefore read only what already exists at that moment: the <service>-secrets Secret,
+which the infrastructure-only pass (infraOnly) also renders. The init container waits until PostgreSQL accepts
+connections. All Jobs share one hook weight; Helm then runs them one after another, ordered by name.
+*/ -}}
+{{- if not .Values.infraOnly }}
+{{- $wait := .Values.migrations.waitForDatabase }}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.migrate }}
+{{- $job := printf "%s-migrate" $name }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $job }}
+  labels:
+    {{- include "ledgerline.labels" (dict "name" $job "root" $) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      # Labelled <service>-migrate, so the <service> Service selector never matches this pod.
+      labels:
+        {{- include "ledgerline.labels" (dict "name" $job "root" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $.Values.global.runAsUser }}
+        runAsGroup: {{ $.Values.global.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ $.Values.infra.postgres.image | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          # -U is required: the uid has no passwd entry, and without a user name pg_isready reports "no attempt".
+          command:
+            - sh
+            - -c
+            - until pg_isready -h {{ $wait.host }} -p {{ $wait.port }} -U postgres; do sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      containers:
+        - name: migrate
+          image: {{ $svc.image | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          args: ["migrate"]
+          env:
+            - name: ConnectionStrings__Database
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-secrets
+                  key: ConnectionStrings__Database
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+{{- end }}
+{{- end }}
+{{- end }}

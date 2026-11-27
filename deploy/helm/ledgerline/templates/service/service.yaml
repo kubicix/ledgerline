@@ -1,0 +1,26 @@
+{{- if not .Values.infraOnly }}
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ledgerline.labels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  {{- if $svc.nodePort }}
+  type: NodePort
+  {{- else }}
+  type: ClusterIP
+  {{- end }}
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" $name "root" $) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+      {{- if $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
+{{- end }}
+{{- end }}

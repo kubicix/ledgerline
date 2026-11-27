@@ -29,8 +29,20 @@ jobs:
         run: dotnet build Ledgerline.slnx --no-restore -c Release
       - name: Test
         run: dotnet test --solution Ledgerline.slnx --no-build -c Release
+
+  compose-validate:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.2
       - name: Validate Compose file
         run: docker compose config --quiet
+      - name: Helm chart render tests
+        run: ./deploy/helm/ledgerline/tests/render_test.sh
 
   security:
     runs-on: ubuntu-latest
@@ -190,4 +202,52 @@ jobs:
         with:
           name: k6-smoke-compose-logs
           path: compose-logs.txt
+          if-no-files-found: ignore
+
+  kind:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Sized from a measured local run (about 10 min deploy plus 11 min resilience, warm image cache) plus a cold
+    # runner that also builds every image and pulls the infrastructure images. Wider than the 15 min in docs/testing.md.
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.2
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.15.2
+        with:
+          version: v0.33.0
+          node_image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+          cluster_name: ledgerline
+          config: deploy/kind/cluster.yaml
+          wait: 120s
+      - name: Build, load and install
+        timeout-minutes: 20
+        run: ./scripts/kind-deploy.sh
+      - name: Smoke flow
+        timeout-minutes: 5
+        run: ./scripts/smoke.sh http://localhost:8080
+      - name: Resilience proof
+        timeout-minutes: 25
+        run: ./scripts/kind-resilience.sh
+      - name: Collect pod logs
+        if: failure() || cancelled()
+        run: |
+          mkdir -p kind-logs
+          kc="kubectl --context kind-ledgerline"
+          $kc get pods -A -o wide > kind-logs/pods.txt 2>&1 || true
+          $kc get events -A --sort-by=.lastTimestamp > kind-logs/events.txt 2>&1 || true
+          $kc describe pods > kind-logs/describe-pods.txt 2>&1 || true
+          for pod in $($kc get pods -o name 2>/dev/null | sed 's|^pod/||'); do
+            $kc logs "$pod" --all-containers --prefix --timestamps > "kind-logs/$pod.log" 2>&1 || true
+            $kc logs "$pod" --all-containers --prefix --timestamps --previous > "kind-logs/$pod.previous.log" 2>/dev/null || rm -f "kind-logs/$pod.previous.log"
+          done
+      - name: Upload pod logs
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kind-pod-logs
+          path: kind-logs/
           if-no-files-found: ignore

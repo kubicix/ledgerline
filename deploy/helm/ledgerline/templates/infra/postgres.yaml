@@ -1,0 +1,133 @@
+{{- /*
+PostgreSQL for the five services (compose.yaml: postgres). A StatefulSet with a PVC, so the data survives pod
+restarts. Not a hook: it is a regular part of the release (docs/kubernetes.md, two-pass deploy). Set
+infra.postgres.enabled=false to use an external server; the migration Jobs then wait for migrations.waitForDatabase.host.
+The init script creates one database and login per service, and runs only on an empty data directory.
+*/ -}}
+{{- $pg := .Values.infra.postgres }}
+{{- if $pg.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secrets
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "postgres" "root" $) | nindent 4 }}
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: {{ $pg.password | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "postgres" "root" $) | nindent 4 }}
+data:
+  init-databases.sql: |
+    {{- .Files.Get "files/init-databases.sql" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "postgres" "root" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "postgres" "root" $) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "postgres" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: postgres
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "postgres" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "postgres" "root" $) | nindent 8 }}
+      annotations:
+        checksum/init: {{ .Files.Get "files/init-databases.sql" | sha256sum }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $pg.runAsUser | nindent 8 }}
+      containers:
+        - name: postgres
+          image: {{ $pg.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # 5 app services x 40 pooled connections = 200, so 300 leaves headroom for migrations and admin.
+          args:
+            - postgres
+            - -c
+            - max_connections={{ $pg.maxConnections }}
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $pg.resources | nindent 12 }}
+          # The Compose health check: pg_isready against 127.0.0.1 as postgres.
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+            items:
+              - key: init-databases.sql
+                path: 10-init-databases.sql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ledgerline.selectorLabels" (dict "name" "postgres" "root" $) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $pg.storage }}
+{{- end }}

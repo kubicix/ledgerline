@@ -1,18 +1,14 @@
-using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Ledgerline.Accounts.Infrastructure;
 
-public sealed class ReadinessCheck(AccountsDbContext db, RabbitMqConnection broker) : IHealthCheck
+/// <summary>Readiness of the service's own database. The broker check comes from messaging (RabbitMqHealthCheck).</summary>
+public sealed class ReadinessCheck(AccountsDbContext db) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            if (!await db.Database.CanConnectAsync(cancellationToken)) return HealthCheckResult.Unhealthy("Database unavailable.");
-            return await broker.IsReadyAsync(cancellationToken) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Broker unavailable.");
-        }
-        catch (Exception error) { return HealthCheckResult.Unhealthy("Dependency unavailable.", error); }
+        try { return await db.Database.CanConnectAsync(cancellationToken) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Database unavailable."); }
+        catch (Exception error) { return HealthCheckResult.Unhealthy("Database unavailable.", error); }
     }
 }

@@ -740,7 +740,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T01: Tooling and kind cluster definition
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011, ADR 0000. **Depends:** M3 complete.
 **Files:** Create `deploy/kind/cluster.yaml` (one control-plane node, `extraPortMappings` container port 30080 to host 8080, 30300 to host 3000, 30025 to host 8025), `scripts/kind-up.sh` and `.ps1` (create cluster `ledgerline` if absent), `scripts/kind-down.sh` and `.ps1`, `docs/kubernetes.md` (install instructions for kind v0.33.0 and Helm v4.3.2 on Windows, macOS, Linux; re-verify both versions first).
@@ -749,7 +749,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T02: Health and shutdown behavior required by Kubernetes
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `building-blocks.md` sections 8 (graceful shutdown) and 9 (Health); ADR 0011. **Depends:** M3 complete.
 **Files:** Modify Web `Health/HealthEndpoints.cs` (ready check includes a RabbitMQ connection check supplied by Messaging through `IHealthCheck` registration), Messaging `RabbitMq/RabbitMqHealthCheck.cs`, Web `WebDefaults.cs` (`HostOptions.ShutdownTimeout = 25 s`; readiness returns 503 as soon as `ApplicationStopping` fires). Test `tests/Ledgerline.Accounts.IntegrationTests/HealthTests.cs`.
@@ -759,7 +759,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T03: Helm chart: generic service templates
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T01.
 **Files:** Create `deploy/helm/ledgerline/Chart.yaml`, `values.yaml` (map `services:` with entries `accounts`, `payments`, `risk`, `notifications`, `banksim`, `gateway`: image, replicas, port, env, `migrate: true|false`, `nodePort` for the gateway), `templates/_helpers.tpl`, `templates/service/{deployment.yaml,service.yaml,configmap.yaml,pdb.yaml}` (each a `range` over `.Values.services`), `templates/secrets.yaml`. Deployment: non-root security context, resource requests and limits, `startupProbe` (`/health/live`, 30 x 2 s), `livenessProbe` (`/health/live`), `readinessProbe` (`/health/ready`), `terminationGracePeriodSeconds: 30`, `preStop` sleep 5 s. Create `deploy/helm/ledgerline/tests/render_test.sh`.
@@ -769,7 +769,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T04: Helm chart: migration jobs
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011; `design.md` section 11. **Depends:** M4-T03.
 **Files:** Create `templates/service/migrate-job.yaml` (hook `pre-install,pre-upgrade`, weight after infrastructure, `backoffLimit: 6`, `hook-delete-policy: before-hook-creation,hook-succeeded`, args `["migrate"]`, an init container that waits for PostgreSQL with `pg_isready`). Extend `render_test.sh`.
@@ -779,7 +779,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T05: Helm chart: infrastructure templates
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T03.
 **Files:** Create `templates/infra/{postgres.yaml,rabbitmq.yaml,redis.yaml,keycloak.yaml,otel-lgtm.yaml,mailpit.yaml}` (StatefulSet with a PVC for PostgreSQL and RabbitMQ; Deployments for the rest; ConfigMaps carrying `init-databases.sql`, the realm JSON, and the Grafana dashboard, loaded with `.Files.Get` from `deploy/helm/ledgerline/files/`, which are copies kept in sync by `scripts/sync-helm-files.sh` and checked by the render test), each guarded by `infra.<name>.enabled`. Infrastructure that must exist before migration hooks is itself installed as `pre-install` hooks with a lower weight, or the migrate Job's init container waits for it; choose the init-container wait (simpler, no hook ordering).
@@ -789,7 +789,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T06: One command on Kubernetes and smoke
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011. **Depends:** M4-T02, M4-T04, M4-T05.
 **Files:** Create `scripts/kind-deploy.sh` and `.ps1` (build images with `docker compose --profile app build`, `kind load docker-image` each, `helm upgrade --install ledgerline deploy/helm/ledgerline --wait --timeout 10m`), modify `scripts/smoke.*` to take the base URL and Keycloak URL as arguments. Keycloak issuer: tokens are requested from inside the cluster's point of view and validated by services with the in-cluster authority; set `KC_HOSTNAME` so that the issuer is the same string for the smoke script and the services (document the chosen approach in `docs/kubernetes.md`).
@@ -798,7 +798,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T07: Resilience on Kubernetes
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011 (proof for the definition of done). **Depends:** M4-T06.
 **Files:** Create `scripts/kind-resilience.sh`: start a 60 s workload (reuse `tests/k6/smoke.js` against the kind gateway), after 15 s run `kubectl delete pod -l app.kubernetes.io/name=payments --grace-period=0 --force`, after 30 s the same for `accounts`, wait for the workload, then assert through the API: no payment `Processing`, trial balance zero, zero `ManualReview`. Also `kubectl rollout restart deployment/payments` during a second run and assert zero failed requests at the gateway other than `503` during the restart window (replicas set to 2 for this check through `--set services.payments.replicas=2`).
@@ -807,7 +807,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T08: CI job for kind, README
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M4-T07.
 **Files:** Modify `.github/workflows/ci.yml`: job `kind` on main (`helm/kind-action@v1.15.2` with `deploy/kind/cluster.yaml`, `azure/setup-helm@v5`, `scripts/kind-deploy.sh`, smoke, `scripts/kind-resilience.sh`, upload `kubectl logs` of all pods on failure); add `render_test.sh` to the `compose-validate` job. Modify `README.md` ("Run on Kubernetes" section with the three commands, the probe table, and the stated limits of the dev-grade infrastructure).
@@ -816,9 +816,9 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ## Milestone 4 checklist
 
-- [ ] Runs on Kubernetes through Helm (M4-T06). **DoD: runs on Kubernetes**
-- [ ] Startup, liveness, readiness probes on every service, tested (M4-T02, M4-T03). **DoD: health checks**
-- [ ] Pod deletion and rolling restart proven harmless (M4-T07).
+- [x] Runs on Kubernetes through Helm (M4-T06). **DoD: runs on Kubernetes**
+- [x] Startup, liveness, readiness probes on every service, tested (M4-T02, M4-T03). **DoD: health checks**
+- [x] Pod deletion and rolling restart proven harmless (M4-T07).
 - [ ] CI deploys to kind (M4-T08).
 
 ---

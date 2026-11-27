@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
@@ -45,6 +46,9 @@ public static class WebDefaults
             provider.GetRequiredService<IConnectionMultiplexer>(), serviceName,
             provider.GetRequiredService<ILogger<RedisIdempotencyStore>>()));
         builder.Services.AddHealthChecks();
+        // Kubernetes budget: preStop sleep 5 s + this timeout 25 s = terminationGracePeriodSeconds 30 s.
+        // The consumer drain (up to 20 s) runs inside this timeout.
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(25));
         return builder;
     }
 

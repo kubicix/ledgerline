@@ -1,0 +1,182 @@
+{{- /*
+RabbitMQ (compose.yaml: rabbitmq). A StatefulSet with a PVC: the node name derives from the pod name, which is stable,
+so the quorum queues find their data again after a restart. The services declare their own exchanges and queues at
+startup (BuildingBlocks Topology). The rabbitmq-definitions Job below is the Compose rabbitmq-init job: it imports
+files/local-events.json (a copy of deploy/compose/rabbitmq/local-events.json), whose local.events queue is the only
+binding for accounts.event.journal-entry-posted.v1. Without it the Accounts relay publishes that event unroutable,
+retries it and holds back every later Accounts message. The Job is a pre-install,pre-upgrade hook with a weight below
+the migration Jobs, so it runs before any service of the upgrade starts; like them it reads only what the
+infrastructure-only pass also renders (rabbitmq-secrets and the rabbitmq-definitions ConfigMap). Importing the file at
+node boot instead (definitions.local.path) would skip creating the default user.
+*/ -}}
+{{- $mq := .Values.infra.rabbitmq }}
+{{- if $mq.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-secrets
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+type: Opaque
+stringData:
+  RABBITMQ_DEFAULT_USER: {{ $mq.user | quote }}
+  RABBITMQ_DEFAULT_PASS: {{ $mq.password | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-definitions
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+data:
+  local-events.json: |
+    {{- .Files.Get "files/local-events.json" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: rabbitmq
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "rabbitmq" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "rabbitmq" "root" $) | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $mq.runAsUser | nindent 8 }}
+      containers:
+        - name: rabbitmq
+          image: {{ $mq.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - secretRef:
+                name: rabbitmq-secrets
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $mq.resources | nindent 12 }}
+          # The Compose health check. Each exec starts an Erlang VM, hence the generous timeouts.
+          startupProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 30
+            failureThreshold: 4
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ledgerline.selectorLabels" (dict "name" "rabbitmq" "root" $) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $mq.storage }}
+{{- if not .Values.infraOnly }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rabbitmq-definitions
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "rabbitmq-definitions" "root" $) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      # Labelled rabbitmq-definitions, so the rabbitmq Service and StatefulSet selectors never match this pod.
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "rabbitmq-definitions" "root" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $mq.runAsUser | nindent 8 }}
+      containers:
+        - name: import
+          image: {{ $mq.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["rabbitmqadmin", "definitions", "import", "--file", "/etc/ledgerline/rabbitmq/local-events.json"]
+          env:
+            - name: RABBITMQADMIN_TARGET_HOST
+              value: rabbitmq
+            - name: RABBITMQADMIN_NON_INTERACTIVE_MODE
+              value: "true"
+            - name: RABBITMQADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_DEFAULT_PASS
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: definitions
+              mountPath: /etc/ledgerline/rabbitmq
+              readOnly: true
+      volumes:
+        - name: definitions
+          configMap:
+            name: rabbitmq-definitions
+{{- end }}
+{{- end }}

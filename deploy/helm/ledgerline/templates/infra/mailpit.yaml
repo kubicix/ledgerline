@@ -1,0 +1,92 @@
+{{- /*
+Mailpit (compose.yaml: mailpit): SMTP sink on 1025 for Notifications and a web UI on 8025. The database file is
+in an emptyDir, so captured mail is lost when the pod is replaced (Mailpit persistence is a deferred M3 item).
+*/ -}}
+{{- $m := .Values.infra.mailpit }}
+{{- if $m.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "mailpit" "root" $) | nindent 4 }}
+spec:
+  # Only the web UI has a fixed nodePort (mapped to host port 8025 by the kind cluster). Kubernetes assigns the
+  # SMTP port a random node port; it is not published to the host.
+  type: NodePort
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "mailpit" "root" $) | nindent 4 }}
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: smtp
+    - name: http
+      port: 8025
+      targetPort: http
+      nodePort: {{ $m.uiNodePort }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "mailpit" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "mailpit" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "mailpit" "root" $) | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $m.runAsUser | nindent 8 }}
+      containers:
+        - name: mailpit
+          image: {{ $m.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: MP_DATABASE
+              value: /data/mailpit.db
+          ports:
+            - name: smtp
+              containerPort: 1025
+            - name: http
+              containerPort: 8025
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+{{- end }}

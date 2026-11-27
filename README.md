@@ -20,8 +20,8 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
-| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented and reviewed on branch `milestone-3`; not yet merged or pushed |
-| M4 | Kubernetes with Helm and health checks | Not started |
+| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented, reviewed and merged to `main` ([integration record](https://github.com/kubicix/ledgerline/pull/3)) |
+| M4 | Kubernetes with Helm and health checks | Implemented and reviewed; the cluster deploy, smoke flow and pod-deletion and rolling-restart resilience checks were verified on a local kind cluster |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
 
@@ -238,7 +238,51 @@ spans are filtered out:
 
 ## Run on Kubernetes
 
-_Placeholder: filled in M4-T08 (kind, Helm, probes, limits of the dev-grade setup)._
+The same system runs on a local [kind](https://kind.sigs.k8s.io/) cluster, packaged as one umbrella Helm chart
+(`deploy/helm/ledgerline`). You need Docker, kind, Helm 4 and kubectl (install steps in
+[docs/kubernetes.md](docs/kubernetes.md)). Stop the Compose stack first: both use host ports 8080, 8081, 3000 and 8025.
+
+```bash
+./scripts/kind-up.sh                       # create the cluster "ledgerline"
+./scripts/kind-deploy.sh                   # build and load the images, install the chart, wait until ready
+./scripts/smoke.sh http://localhost:8080   # the same smoke flow as on Compose
+```
+
+PowerShell has twins for each script: `kind-up.ps1`, `kind-deploy.ps1`, `smoke.ps1` and `kind-down.ps1`. The
+resilience proof is `./scripts/kind-resilience.sh`: it deletes Payments and Accounts pods and then does a rolling
+restart of Payments during a k6 workload, and it passes only when no payment is stuck and the trial balance is zero.
+The `kind` job in [ci.yml](.github/workflows/ci.yml) runs the deploy, the smoke flow and the resilience proof on every
+push to `main`.
+
+Every service has the same three probes, rendered from one template:
+
+| Probe | Endpoint | Settings | Meaning |
+|---|---|---|---|
+| Startup | `GET /health/live` | every 2 s, 30 failures allowed | Gives a slow first start up to 60 s before liveness begins |
+| Liveness | `GET /health/live` | every 10 s, 3 failures | The process answers; it never checks a dependency |
+| Readiness | `GET /health/ready` | every 5 s, 3 failures | Accounts, Payments, Risk, Notifications: the service's own database and the RabbitMQ connection. BankSimulator: its own database only. Gateway: Keycloak signing keys fetched once. Never another service |
+
+On shutdown a pod sleeps 5 s in a `preStop` hook, so the endpoint lists catch up, and reports `503` on `/health/ready`
+from the start of the shutdown. It then finishes the messages in flight within a termination grace period of 30 s.
+Migrations are not run by the services: a Helm hook Job per database runs the service image's `migrate` command, and a
+first install runs in two passes so that PostgreSQL exists before the first migration (explained in
+[docs/kubernetes.md](docs/kubernetes.md)).
+
+The infrastructure is dev-grade on purpose (ADR 0011). Limits:
+
+- One single-node kind cluster, one replica of PostgreSQL, RabbitMQ, Redis, Keycloak and the telemetry container: no
+  high availability, no operators.
+- Only PostgreSQL and RabbitMQ keep their data on a volume. Redis, Mailpit and the telemetry data are in `emptyDir`
+  volumes and are lost when their pod is replaced; telemetry is disposable.
+- Credentials are dev values committed in `values.yaml` and rendered as plain Kubernetes Secrets. A real deployment
+  would use an external secret store.
+- No ingress controller and no TLS. The gateway is a NodePort mapped to `localhost:8080`, and it stays the only public
+  entry for the API. Keycloak runs in dev mode on `localhost:8081`.
+- The application images are tagged `:local` and loaded into the node, not pulled from a registry.
+
+The production path is CloudNativePG, the RabbitMQ Cluster Operator and a managed Redis or Valkey, an external
+secret store and an ingress with TLS; the reasoning is in [ADR 0011](docs/adr/0011-kubernetes-packaging.md). Details of the cluster, the two-pass deploy
+and the resilience checks are in [docs/kubernetes.md](docs/kubernetes.md).
 
 ## Phase 2: event stream, read model, reconciliation
 

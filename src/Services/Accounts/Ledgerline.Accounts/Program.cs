@@ -27,7 +27,7 @@ if (command == "rebuild-projections")
 }
 builder.AddLedgerlineTelemetry("accounts");
 builder.AddLedgerlineWebDefaults("accounts");
-builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("dependencies", timeout: TimeSpan.FromSeconds(3));
+builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("database", timeout: TimeSpan.FromSeconds(3));
 builder.Services.AddDbContext<AccountsDbContext>((services, options) =>
     options.UseNpgsql(services.GetRequiredService<IConfiguration>().GetConnectionString("Database")));
 builder.Services.AddScoped<EventStore>();

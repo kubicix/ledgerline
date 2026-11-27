@@ -33,6 +33,7 @@ ADR refers to it instead of repeating numbers.
 | RabbitMQ.Client | 7.2.2 | Apache-2.0 OR MPL-2.0 | Messaging transport |
 | MailKit | 5.0.0 | MIT | SMTP sender. Verified on nuget.org/packages/MailKit/5.0.0 on 2026-11-13 |
 | Microsoft.EntityFrameworkCore (and ASP.NET Core packages) | 10.0.15 | MIT | Persistence, web. Latest `10.0.x`; `11.0.0` is the newest overall |
+| Microsoft.Extensions.Diagnostics.HealthChecks | 10.0.15 | MIT | Broker readiness check in `BuildingBlocks.Messaging` (M4-T02). Checked on nuget.org on 2026-11-26: 10.0.15 is the latest `10.0.x` |
 | Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3 | PostgreSQL | EF Core provider |
 | StackExchange.Redis | 3.4.35 | MIT | Idempotency cache, velocity windows, locks |
 | Yarp.ReverseProxy | 2.3.0 | MIT | Gateway. Targets net8.0 at most; runs on net10.0 |
@@ -84,16 +85,16 @@ Considered and not used:
 | Item | Version |
 |---|---|
 | Docker Engine / Compose (local) | 29.9.2 / v5.6.0 |
-| kind | v0.33.0 (not installed locally yet) |
-| Helm | v4.3.2 (not installed locally yet) |
+| kind | v0.33.0. Re-verified 2026-11-26: latest release (2026-08-26). Installed locally with winget (`Kubernetes.kind`). Default node image `kindest/node:v1.37.0`, not pinned in `deploy/kind/cluster.yaml` |
+| Helm | v4.3.2. Re-verified 2026-11-26: latest v4 release (2026-11-13; v3 line is at v3.22.1). Installed locally with winget (`Helm.Helm`) |
 | actions/checkout | v7 |
 | actions/setup-dotnet | v6 |
 | actions/upload-artifact | v7 |
 | actions/dependency-review-action | v5. Re-checked 2026-11-26: latest release v5.0.1; `v5` is a branch, not a tag. Private repositories need GitHub Advanced Security (README) |
 | gitleaks/gitleaks-action | v3. Re-checked 2026-11-26: tag `v3` (v3.0.0, Node 24). No license key needed for personal-account repositories, required for organizations (README). CI pins the CLI with `GITLEAKS_VERSION: 8.30.1`. On pull requests it calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/commits` (v3 `src/gitleaks.js`; the README lists no permissions), so the job grants `pull-requests: read` |
 | aquasecurity/trivy-action | v0.36.0. Verified 2026-11-26: tag `refs/tags/v0.36.0` exists and is the latest release (2026-04-22, GitHub releases API). Its `action.yaml` defaults the Trivy CLI to `v0.70.0` (installed through `aquasecurity/setup-trivy` v0.2.6, pinned by hash); CI passes `version: v0.70.0` explicitly. The newest Trivy release is v0.76.2 (2026-11-05); CI stays on the action default |
-| helm/kind-action | v1.15.2 |
-| azure/setup-helm | v5 |
+| helm/kind-action | v1.15.2. Re-verified 2026-11-26: latest release (2026-11-04) |
+| azure/setup-helm | v5. Re-verified 2026-11-26: tag `refs/tags/v5` exists, latest release v5.1.0 (2026-11-09) |
 | grafana/setup-k6-action | v1 |
 | github/codeql-action | v4. Verified 2026-11-26: tag `refs/tags/v4` exists; newest tag v4.39.5 (GitHub tags API) |
 | gitleaks CLI | v8.30.1. Latest release (GitHub releases API, 2026-11-26) |

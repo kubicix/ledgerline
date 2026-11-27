@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 
 namespace Ledgerline.BuildingBlocks.Messaging;
@@ -44,6 +45,7 @@ public static class MessagingServiceCollectionExtensions
         services.TryAddSingleton<ICrashPoint, NoCrashPoint>();
         services.TryAddSingleton<IAckStrategy, DefaultAckStrategy>();
         services.TryAddSingleton<RabbitMqConnection>();
+        services.AddHealthChecks().AddCheck<RabbitMqHealthCheck>("broker", HealthStatus.Unhealthy, timeout: TimeSpan.FromSeconds(3));
         if (useOutbox)
         {
             services.TryAddSingleton<OutboxSignal>();
