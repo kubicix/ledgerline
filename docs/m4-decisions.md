@@ -133,6 +133,5 @@ Final re-audit of the resilience fix:
 
 ## Open owner items
 
-- Push `milestone-4` and open a pull request. `build-test`, `security`, `codeql` and the new `compose-validate` run there.
-- After the merge, check that the first `kind` job on `main` is green. Then tick checklist row 4 ("CI deploys to kind"), which is proven locally and pending in CI.
+- Closed: the branch was merged through pull request #30. Its checks passed, and the first `kind` job on `main` was green (merge commit bff7de0), so checklist row 4 is ticked. The GitGuardian check on the pull request flagged the development Keycloak password that `render_test.sh` asserts; the owner closed it as a test credential.
 - Decide on deferred finding 7 (bind kind to `127.0.0.1`) before running the cluster on an untrusted network.

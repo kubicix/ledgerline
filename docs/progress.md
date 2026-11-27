@@ -8,9 +8,8 @@ Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
 - M2: complete and merged through [PR #2](https://github.com/kubicix/ledgerline/pull/2).
 - M3: complete and merged through [PR #3](https://github.com/kubicix/ledgerline/pull/3)
   (merge commit 142f201, BASE 1e19932).
-- M4: implemented, reviewed and audited on branch `milestone-4` (BASE d0bb564), all
-  eight tasks committed; verified locally on kind. Not pushed or merged yet; the
-  `compose-validate` job (pull request) and the `kind` job (main) have not run.
+- M4: complete and merged through [PR #30](https://github.com/kubicix/ledgerline/pull/30)
+  (merge commit bff7de0, BASE d0bb564).
 - M5 and later milestones: not started.
 - Overall: 65 of 82 planned tasks, approximately 79%. Counting basis: `docs/plan.md`
   has 83 Done boxes, including the optional M6-T07 Angular admin panel; 82 excludes
@@ -32,7 +31,8 @@ Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
   Hosted results are under Verification evidence.
 - [x] M4: Kubernetes with Helm on kind, Kubernetes-friendly readiness and shutdown,
   pod-deletion and rolling-restart resilience, CI jobs `kind` and `compose-validate`.
-  Checklist row "CI deploys to kind" stays open until the first green `kind` run on main.
+- Integration record for M4: [PR #30 checks and merge](https://github.com/kubicix/ledgerline/pull/30).
+  Hosted results are under Verification evidence.
 - [ ] M5: reporting, event streaming and reconciliation.
 - [ ] M6: Blazor UI.
 
@@ -51,7 +51,16 @@ not implemented by M4.
 
 ## Verification evidence
 
-M4, local, on branch `milestone-4`:
+M4, hosted CI:
+- Pull request #30: `build-test` (7m22s), `security`, `compose-validate`, `analyze`
+  and CodeQL passed. The GitGuardian check flagged the development Keycloak password
+  that `render_test.sh` asserts (the same value as in `compose.yaml`); the owner
+  closed it as a test credential.
+- Merge commit bff7de0 on main: `kind` (deploy, smoke and resilience, 8 minutes),
+  `build-test`, `system-tests`, `images`, `security` and `compose-validate` passed.
+  The last M4 checklist row ("CI deploys to kind") is ticked on this evidence.
+
+M4, local, on branch `milestone-4` before the merge:
 - Full suite once at the end, with no kind cluster and no Compose project up: 530
   total (525 plus the five new HealthTests), 524 passed, 6 skipped (the same six as
   M3), 0 failed, 10m27s.
@@ -116,12 +125,10 @@ without deleting their data.
 
 ## Continuation instructions
 
-1. Finish M4 integration: push `milestone-4`, open a pull request, and check that
-   `build-test`, `security`, `codeql` and `compose-validate` pass. After the merge,
-   check the first `kind` job on main, then tick the last M4 checklist row. Open
-   items are in [M4 decisions](m4-decisions.md) (including binding kind's host ports
-   to `127.0.0.1`) and [M3 decisions](m3-decisions.md) (Dependabot major bumps,
-   nightly `k6-smoke`, LICENSE, secret scanning).
+1. Open owner decisions before or alongside M5: the items in
+   [M4 decisions](m4-decisions.md) (including binding kind's host ports to
+   `127.0.0.1`) and [M3 decisions](m3-decisions.md) (Dependabot major bumps, nightly
+   `k6-smoke`, LICENSE, secret scanning).
 2. Then start at M5-T01. Re-verify the Phase 2 versions in ADR 0000 first, as the
    plan says, and read the next task's spec in [the plan](plan.md). Create the next
    branch from updated main. `kind`, `helm` and `kubectl` are installed.

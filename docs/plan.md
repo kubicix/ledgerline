@@ -819,7 +819,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 - [x] Runs on Kubernetes through Helm (M4-T06). **DoD: runs on Kubernetes**
 - [x] Startup, liveness, readiness probes on every service, tested (M4-T02, M4-T03). **DoD: health checks**
 - [x] Pod deletion and rolling restart proven harmless (M4-T07).
-- [ ] CI deploys to kind (M4-T08).
+- [x] CI deploys to kind (M4-T08).
 
 ---
 
