@@ -189,3 +189,70 @@ succeed. Grafana is at `http://localhost:3000` and Mailpit at `http://localhost:
 Telemetry is disposable. Its collector can exceed the 4 GiB limit under steady load (a known Milestone 3 finding), and
 Kubernetes then restarts the otel-lgtm container. No service readiness check depends on otel-lgtm: with the otel-lgtm
 pod deleted and recreated, every service stayed `Ready` and the API kept answering.
+
+## Resilience
+
+```bash
+./scripts/kind-resilience.sh
+```
+
+The script proves that deleting pods and a rolling restart during a workload lose no money (ADR 0011). It runs on a
+cluster prepared with `kind-up` and `kind-deploy`, and it can run again on the same cluster with no reset in between.
+It prints `RESILIENCE OK` and exits 0, or names the failed check and exits non-zero. One run took about 8.5
+minutes on a developer machine, mostly the two `kind-deploy` calls (2 to 3 minutes each, they rebuild and load the
+images) and the two k6 runs (about 1.5 minutes each).
+
+Both runs use the unchanged `tests/k6/smoke.js` (5 VUs for 60 s, top-ups and transfers), started through
+`scripts/k6.sh`:
+
+1. **Pod deletion.** Payments runs with one replica (if an earlier run left two, the script first runs `kind-deploy`
+   with the chart defaults). 15 s into the load phase the script runs
+   `kubectl delete pod -l app.kubernetes.io/name=payments --grace-period=0 --force`, and at 30 s the same for
+   `accounts`.
+2. **Rolling restart.** The script runs `kind-deploy --set services.payments.replicas=2` (which also renders the
+   Payments PodDisruptionBudget), starts the workload again, and runs `kubectl rollout restart deployment/payments`
+   10 s into the load phase, followed by `kubectl rollout status`.
+
+The load phase starts when k6's `setup()` ends: about 90 s after k6 starts on a new cluster (logins, 210 wallets and
+their top-ups), under 20 s later on, when the wallets exist and hold enough money. The script waits for k6's first
+`running (...)` progress line and times the kill and restart points from it, so they always fall inside the 60 s of
+load.
+
+After each run the script checks, through the gateway with an admin token:
+
+- no payment is left `Processing` or `Compensating` (polled for up to 180 s), and none is `ManualReview`. It asks
+  `GET /api/payments?accountId=...&status=...` for the wallets of the VU users. `smoke.js` VU n acts for
+  `load-customer-00n`, so every payment of the load phase has one of those wallets as source or destination. The
+  setup top-ups of the other wallets are awaited to `Completed` by k6's `setup()` itself;
+- k6's `teardown()` logged that every customer wallet was drained (it asks the same endpoint for all 200 wallets);
+- the trial balance (`GET /api/ledger/trial-balance`) is zero in every currency;
+- at least one saga completed and every deleted pod existed, so an empty run cannot pass.
+
+The rolling restart adds one check. Every failed load-phase request to the gateway must be a `503` inside the restart
+window: from `rollout restart` until 15 s after `rollout status` returned. The 15 s cover one interval of the
+gateway's active health check on Payments (10 s, 3 s timeout). A `502`, a `504`, a connection error or a `503` outside
+the window fails the run. The script reads each request's status from k6's CSV output (`--out csv`) and takes the
+window from the Docker engine clock, the clock k6 also uses.
+
+k6 itself exits with 99 when a threshold is crossed. The scenario's latency thresholds were missed on this host in
+Milestone 3 for reasons outside Ledgerline (disk stalls), and pods that are deleted during a run make latency worse
+anyway. The script therefore accepts 0 or 99 and judges the money with its own checks. Any other k6 exit code (an
+error in setup or teardown, for example) fails the run.
+
+How the workload reaches the cluster: k6 runs in Docker, so it joins the kind node's Docker network (`kind`) and uses
+the node's NodePorts (`http://ledgerline-control-plane:30080` for the gateway, `:30081` for Keycloak). The script reads
+the node name, its network and the NodePorts from `kind` and `kubectl`. Tokens requested at the node name still carry
+the issuer `http://localhost:8081/realms/ledgerline`, because `KC_HOSTNAME` is fixed, so the services accept them.
+This works the same on Linux, where `host.docker.internal` does not exist. The script's own checks use the host
+mappings (`GATEWAY_URL` and `KEYCLOAK_URL`, by default `localhost:8080` and `localhost:8081`), as `smoke.sh` does.
+
+Every k6 run gets a new `RUN_ID`, so every run creates new payments with new idempotency keys. The k6 summary stays
+inside the container. The CSV goes to `docs/results/raw` under a `kind-resilience-*` name and is deleted when the script
+exits, so a run leaves no files behind.
+
+When the script ends, Payments still runs with two replicas. The next `kind-resilience` run, or a plain
+`./scripts/kind-deploy.sh`, sets it back to one.
+
+Limits: a zero trial balance shows that every posting balanced, but it would not reveal a transfer that was posted
+twice (both legs twice). The checks above cover what the plan asks for: no payment stuck, no `ManualReview`, a zero
+trial balance, and only `503` during the restart.

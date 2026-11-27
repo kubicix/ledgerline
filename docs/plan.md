@@ -798,7 +798,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T07: Resilience on Kubernetes
 
-- [ ] Done
+- [x] Done
 
 **Spec:** ADR 0011 (proof for the definition of done). **Depends:** M4-T06.
 **Files:** Create `scripts/kind-resilience.sh`: start a 60 s workload (reuse `tests/k6/smoke.js` against the kind gateway), after 15 s run `kubectl delete pod -l app.kubernetes.io/name=payments --grace-period=0 --force`, after 30 s the same for `accounts`, wait for the workload, then assert through the API: no payment `Processing`, trial balance zero, zero `ManualReview`. Also `kubectl rollout restart deployment/payments` during a second run and assert zero failed requests at the gateway other than `503` during the restart window (replicas set to 2 for this check through `--set services.payments.replicas=2`).
