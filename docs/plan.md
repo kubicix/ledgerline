@@ -807,7 +807,7 @@ M1 uses a development header scheme that M2-T01 replaces.
 
 ### M4-T08: CI job for kind, README
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M4-T07.
 **Files:** Modify `.github/workflows/ci.yml`: job `kind` on main (`helm/kind-action@v1.15.2` with `deploy/kind/cluster.yaml`, `azure/setup-helm@v5`, `scripts/kind-deploy.sh`, smoke, `scripts/kind-resilience.sh`, upload `kubectl logs` of all pods on failure); add `render_test.sh` to the `compose-validate` job. Modify `README.md` ("Run on Kubernetes" section with the three commands, the probe table, and the stated limits of the dev-grade infrastructure).
