@@ -55,7 +55,7 @@ M4, hosted CI:
 - Pull request #30: `build-test` (7m22s), `security`, `compose-validate`, `analyze`
   and CodeQL passed. The GitGuardian check flagged the development Keycloak password
   that `render_test.sh` asserts (the same value as in `compose.yaml`); the owner
-  closed it as a test credential.
+  closed the incident.
 - Merge commit bff7de0 on main: `kind` (deploy, smoke and resilience, 8 minutes),
   `build-test`, `system-tests`, `images`, `security` and `compose-validate` passed.
   The last M4 checklist row ("CI deploys to kind") is ticked on this evidence.
