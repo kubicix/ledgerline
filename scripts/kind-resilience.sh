@@ -9,7 +9,9 @@
 # `kubectl rollout restart deployment/payments` is issued 10 s into its load phase.
 # After each run, through the API: no payment of the workload's wallets left Processing or Compensating, none in
 # ManualReview, k6's teardown saw every customer wallet drained, and the trial balance is zero in every currency.
-# Run 2 also: every failed gateway request of the load phase is a 503 inside the restart window.
+# Run 1 also: a saga completed after the last pod deletion. Run 2 also: every failed gateway request of the load phase
+# is a 503 inside the restart window, and gateway requests were recorded both before the restart and during the
+# rollout. Fault times come from the Docker engine clock, the clock of k6's CSV timestamps.
 #
 # k6 runs in Docker through scripts/k6.sh on the kind node's Docker network and reaches the gateway and Keycloak at the
 # node's NodePorts. The checks of this script use the host mappings, as scripts/smoke.sh does:
@@ -123,6 +125,8 @@ force_delete() {
   out="$("${kc[@]}" delete pod -l "app.kubernetes.io/name=$1" --grace-period=0 --force 2>/dev/null)" || true
   echo "$out"
   grep -q 'deleted' <<<"$out" || fail "no $1 pod was deleted"
+  last_deletion="$(node_time)"
+  say "$1 pods deleted at $last_deletion (Docker engine clock)"
 }
 # k6 exit 99 means a threshold was crossed. The thresholds include latency targets this host misses for reasons outside
 # Ledgerline (disk stalls, M3), so 99 is accepted and the money is judged by this script's own checks. Any other
@@ -139,39 +143,90 @@ finish_workload() {
 }
 
 # ---- k6 CSV ------------------------------------------------------------------------------------------------------
+# Every check takes the CSV file as its first argument, so it can also be run on a saved file (source this script).
+# Sets the variable named $3 to the 1-based index of column $2 in the header of CSV file $1. A missing or doubled
+# column fails the run: an empty index would make awk read the whole row ($0) and the check pass.
+csv_column() {
+  local index
+  index="$(head -n 1 "$1" | tr -d '\r' | tr ',' '\n' | grep -nx "$2" | cut -d: -f1)" || true
+  [[ "$index" =~ ^[1-9][0-9]*$ ]] || fail "the k6 CSV has no '$2' column, or has it twice: $1"
+  printf -v "$3" '%s' "$index"
+}
 # Quoted fields are removed first, so a comma inside a quoted k6 error text cannot shift the columns.
-csv_column() { head -n 1 "$k6_csv" | tr -d '\r' | tr ',' '\n' | grep -nx "$1" | cut -d: -f1; }
-csv_rows() { sed 's/"[^"]*"//g' "$k6_csv" | tr -d '\r' | awk -F, -v metric="$1" '$1 == metric'; }
-csv_count() { csv_rows "$1" | wc -l | tr -d ' '; }
+csv_rows() { sed 's/"[^"]*"//g' "$1" | tr -d '\r' | awk -F, -v metric="$2" '$1 == metric'; }
+csv_count() { csv_rows "$1" "$2" | wc -l | tr -d ' '; }
+# Fails unless $2 is a time of the Docker engine clock (whole seconds since the epoch); $1 names it.
+require_time() { [[ "$2" =~ ^[1-9][0-9]*$ ]] || fail "$1 is not a Docker engine time: '$2'"; }
 workload_counts() {
-  completed="$(csv_count saga_completed)"
-  unsuccessful="$(csv_count saga_unsuccessful)"
-  timeouts="$(csv_count saga_timeouts)"
-  not_accepted="$(csv_count accept_failed)"
+  completed="$(csv_count "$2" saga_completed)"
+  unsuccessful="$(csv_count "$2" saga_unsuccessful)"
+  timeouts="$(csv_count "$2" saga_timeouts)"
+  not_accepted="$(csv_count "$2" accept_failed)"
   say "$1: sagas completed=$completed unsuccessful=$unsuccessful timeouts=$timeouts not-accepted=$not_accepted"
   ((completed > 0)) || fail "$1: no saga completed, the workload did not run"
 }
-# Every http_reqs row of the load phase (scenario smoke) to the gateway with expected_response=false must be a 503
-# whose k6 timestamp lies inside the restart window. Timestamps are whole seconds of the Docker engine clock. Gateway
-# requests are the ones whose url tag contains /api/: k6 sets the url tag to the name tag that lib/api.js gives every
-# gateway request ("GET /api/payments/{id}"), and the Keycloak token requests have no /api/ in either.
+# Run 1: at least one saga completed after the last pod deletion ($2), so the deletions hit a running workload. k6
+# timestamps and $2 are whole seconds of the Docker engine clock, so the comparison is strict.
+check_saga_after_deletion() {
+  local csv="$1" deleted_at="$2" ts after
+  require_time "run1: the last pod deletion" "$deleted_at"
+  csv_column "$csv" timestamp ts
+  after="$(csv_rows "$csv" saga_completed |
+    awk -F, -v ts="$ts" -v at="$deleted_at" '$ts ~ /^[0-9]+$/ && $ts + 0 > at + 0 { n++ } END { print n + 0 }')"
+  [[ "$after" =~ ^[0-9]+$ ]] || fail "run1: cannot count the sagas completed after the last pod deletion"
+  say "run1: $after sagas completed after the last pod deletion"
+  ((after > 0)) || fail "run1: no saga completed after the last pod deletion"
+}
+# Run 2, over the http_reqs rows of the load phase (scenario smoke). The restart window runs from `rollout restart`
+# ($2) until restart_window_tail_s after `rollout status` returned ($3). Timestamps are whole seconds of the Docker
+# engine clock, so the rollout itself counts only the seconds strictly between $2 and $3.
+# - Every row has expected_response true or false and a numeric timestamp and status; anything else fails the run.
+# - A gateway request failed when expected_response is false or its status is 0 (no answer) or 400 and above. Every
+#   failed one must be a 503 inside the restart window.
+# - At least one gateway request lies before the restart and one inside the rollout, so the restart hit live traffic.
+# Gateway requests are the ones whose url tag contains /api/: k6 sets the url tag to the name tag that lib/api.js gives
+# every gateway request ("GET /api/payments/{id}"), and the Keycloak token requests have no /api/ in either.
 check_restart_failures() {
-  local ts status scenario expected url
-  ts="$(csv_column timestamp)" status="$(csv_column status)" scenario="$(csv_column scenario)"
-  expected="$(csv_column expected_response)" url="$(csv_column url)"
-  csv_rows http_reqs | awk -F, -v ts="$ts" -v st="$status" -v sc="$scenario" -v ex="$expected" -v url="$url" \
-    -v gw="/api/" -v from="$window_start" -v to="$((window_end + restart_window_tail_s))" '
-    $sc == "smoke" && index($url, gw) > 0 { total++ }
-    $sc == "smoke" && index($url, gw) > 0 && $ex == "false" {
-      if ($st == "503" && $ts >= from && $ts <= to) allowed++
+  local csv="$1" from="$2" until="$3" ts st sc ex url count
+  require_time "run2: the start of the restart window" "$from"
+  require_time "run2: the end of the rollout" "$until"
+  csv_column "$csv" timestamp ts
+  csv_column "$csv" status st
+  csv_column "$csv" scenario sc
+  csv_column "$csv" expected_response ex
+  csv_column "$csv" url url
+  csv_rows "$csv" http_reqs | awk -F, -v ts="$ts" -v st="$st" -v sc="$sc" -v ex="$ex" -v url="$url" -v gw="/api/" \
+    -v from="$from" -v until="$until" -v to="$((until + restart_window_tail_s))" '
+    $sc != "smoke" { next }
+    ($ex != "true" && $ex != "false") || $ts !~ /^[0-9]+$/ || $st !~ /^[0-9]+$/ {
+      unreadable++
+      if (unreadable <= 20) printf "  unreadable request: t=%s status=%s expected_response=%s %s\n", $ts, $st, $ex, $url
+      next
+    }
+    index($url, gw) == 0 { next }
+    { total++; t = $ts + 0; s = $st + 0 }
+    t < from + 0 { before++ }
+    t > from + 0 && t < until + 0 { during++ }
+    $ex == "false" || s == 0 || s >= 400 {
+      if (s == 503 && t >= from + 0 && t <= to + 0) allowed++
       else { bad++; if (bad <= 20) printf "  failed request: t=%s status=%s %s\n", $ts, $st, $url }
     }
-    END { printf "%d %d %d\n", total, allowed, bad }' >"$work/failures"
+    END { printf "%d %d %d %d %d %d\n", total, before, during, allowed, bad, unreadable }' >"$work/failures"
   sed '$d' "$work/failures"
-  read -r gateway_requests allowed_503 other_failures < <(tail -n 1 "$work/failures")
-  say "run2: $gateway_requests gateway requests in the load phase, $allowed_503 answered 503 in the restart window, $other_failures other failures"
+  read -r gateway_requests requests_before requests_during allowed_503 other_failures unreadable \
+    < <(tail -n 1 "$work/failures")
+  for count in gateway_requests requests_before requests_during allowed_503 other_failures unreadable; do
+    [[ "${!count}" =~ ^[0-9]+$ ]] || fail "run2: cannot read the request counts from the k6 CSV"
+  done
+  say "run2: $gateway_requests gateway requests in the load phase ($requests_before before the restart," \
+    "$requests_during during the rollout), $allowed_503 answered 503 in the restart window," \
+    "$other_failures other failures, $unreadable unreadable rows"
+  ((unreadable == 0)) ||
+    fail "run2: $unreadable load-phase requests with an expected_response other than true or false, or no numeric status or timestamp"
   ((gateway_requests > 0)) || fail "run2: no gateway request was recorded"
   ((other_failures == 0)) || fail "run2: $other_failures failed gateway requests other than 503 in the restart window"
+  ((requests_before > 0)) || fail "run2: no gateway request before the restart"
+  ((requests_during > 0)) || fail "run2: no gateway request during the rollout"
 }
 
 # ---- money checks through the API --------------------------------------------------------------------------------
@@ -217,6 +272,9 @@ assert_money() {
   say "$name: ${#wallets[@]} VU wallets: no payment Processing or Compensating, none in ManualReview; trial balance: $trial"
 }
 
+# Sourced, the script stops here with its functions defined, so the k6 CSV checks can be run on a saved file.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
 # ---- preflight ---------------------------------------------------------------------------------------------------
 for tool in docker kind helm kubectl curl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool not found on PATH, see docs/kubernetes.md" >&2; exit 1; }
@@ -243,7 +301,8 @@ at_load_second "$delete_accounts_at"
 force_delete accounts
 finish_workload run1
 wait_ready payments accounts
-workload_counts run1
+workload_counts run1 "$k6_csv"
+check_saga_after_deletion "$k6_csv" "$last_deletion"
 run1_completed="$completed"
 assert_money run1
 run1_seconds=$((SECONDS - phase_start))
@@ -265,9 +324,9 @@ rollout_seconds=$((window_end - window_start))
 say "rollout finished after $rollout_seconds s"
 finish_workload run2
 wait_ready payments
-workload_counts run2
+workload_counts run2 "$k6_csv"
 run2_completed="$completed"
-check_restart_failures
+check_restart_failures "$k6_csv" "$window_start" "$window_end"
 assert_money run2
 run2_seconds=$((SECONDS - phase_start))
 

@@ -216,7 +216,8 @@ Both runs use the unchanged `tests/k6/smoke.js` (5 VUs for 60 s, top-ups and tra
 The load phase starts when k6's `setup()` ends: about 90 s after k6 starts on a new cluster (logins, 210 wallets and
 their top-ups), under 20 s later on, when the wallets exist and hold enough money. The script waits for k6's first
 `running (...)` progress line and times the kill and restart points from it, so they always fall inside the 60 s of
-load.
+load. k6 2.4.0 prints only `setup()` progress lines while `setup()` runs; the first `running (...)` line follows its
+end within a second (checked with a short scenario whose `setup()` sleeps).
 
 After each run the script checks, through the gateway with an admin token:
 
@@ -226,13 +227,20 @@ After each run the script checks, through the gateway with an admin token:
   setup top-ups of the other wallets are awaited to `Completed` by k6's `setup()` itself;
 - k6's `teardown()` logged that every customer wallet was drained (it asks the same endpoint for all 200 wallets);
 - the trial balance (`GET /api/ledger/trial-balance`) is zero in every currency;
-- at least one saga completed and every deleted pod existed, so an empty run cannot pass.
+- at least one saga completed and every deleted pod existed, so an empty run cannot pass. In the pod deletion run, at
+  least one saga must also have completed after the last deletion, so the deletions hit a running workload. The
+  script takes the time of each deletion from the Docker engine clock and compares it with the CSV timestamps of
+  k6's `saga_completed` counter.
 
-The rolling restart adds one check. Every failed load-phase request to the gateway must be a `503` inside the restart
+The rolling restart adds a check of the failed requests. Every failed load-phase request to the gateway must be a `503` inside the restart
 window: from `rollout restart` until 15 s after `rollout status` returned. The 15 s cover one interval of the
 gateway's active health check on Payments (10 s, 3 s timeout). A `502`, a `504`, a connection error or a `503` outside
 the window fails the run. The script reads each request's status from k6's CSV output (`--out csv`) and takes the
-window from the Docker engine clock, the clock k6 also uses.
+window from the Docker engine clock, the clock k6 also uses. A request counts as failed when k6 marked it unexpected
+(`expected_response=false`) or its status is 0 or 400 and above. The check fails closed: a CSV without one of the
+columns it reads, or a load-phase row whose `expected_response` is neither `true` nor `false`, fails the run. The
+load-phase gateway requests must also include at least one before the restart and one during the rollout, so the
+restart hit live traffic.
 
 k6 itself exits with 99 when a threshold is crossed. The scenario's latency thresholds were missed on this host in
 Milestone 3 for reasons outside Ledgerline (disk stalls), and pods that are deleted during a run make latency worse
