@@ -1,6 +1,6 @@
 # Ledgerline progress and agent handoff
 
-Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline (public).
+Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
 
 ## Checkpoint
 
@@ -8,10 +8,13 @@ Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline (public).
 - M2: complete and merged through [PR #2](https://github.com/kubicix/ledgerline/pull/2).
 - M3: complete and merged through [PR #3](https://github.com/kubicix/ledgerline/pull/3)
   (merge commit 142f201, BASE 1e19932).
-- M4 and later milestones: not started.
-- Overall: 57 of 82 planned tasks, approximately 70%. Counting basis: `docs/plan.md`
+- M4: implemented, reviewed and audited on branch `milestone-4` (BASE d0bb564), all
+  eight tasks committed; verified locally on kind. Not pushed or merged yet; the
+  `compose-validate` job (pull request) and the `kind` job (main) have not run.
+- M5 and later milestones: not started.
+- Overall: 65 of 82 planned tasks, approximately 79%. Counting basis: `docs/plan.md`
   has 83 Done boxes, including the optional M6-T07 Angular admin panel; 82 excludes
-  it; 57 boxes are ticked. Tasks count equally; this is not an effort or
+  it; 65 boxes are ticked. Tasks count equally; this is not an effort or
   production-readiness estimate.
 
 ## Checklist
@@ -27,7 +30,9 @@ Updated: 2026-11-26. Repository: https://github.com/kubicix/ledgerline (public).
 - [x] M3: tracing, metrics, failure/load verification and CI expansion.
 - Integration record for M3: [PR #3 checks and merge](https://github.com/kubicix/ledgerline/pull/3).
   Hosted results are under Verification evidence.
-- [ ] M4: Kubernetes/Helm.
+- [x] M4: Kubernetes with Helm on kind, Kubernetes-friendly readiness and shutdown,
+  pod-deletion and rolling-restart resilience, CI jobs `kind` and `compose-validate`.
+  Checklist row "CI deploys to kind" stays open until the first green `kind` run on main.
 - [ ] M5: reporting, event streaming and reconciliation.
 - [ ] M6: Blazor UI.
 
@@ -38,11 +43,36 @@ transactional outbox/inbox, Redis, Keycloak JWT/OIDC, YARP, MailKit SMTP and Mai
 Tests use xUnit v3, Shouldly and Testcontainers. Docker Compose starts the complete
 system. M3 adds OpenTelemetry (traces and metrics to the otel-lgtm container with
 Tempo, Prometheus and Grafana), k6 (`grafana/k6:2.4.0`), gitleaks, CodeQL and Trivy.
+M4 adds kind v0.33.0 (node `kindest/node:v1.37.0`), Helm v4.3.2 with one umbrella
+chart at `deploy/helm/ledgerline` and dev-grade infrastructure templates, and the
+`Microsoft.Extensions.Diagnostics.HealthChecks` broker check.
 Exact verified versions are in ADR 0000. Later-milestone technologies are planned,
-not implemented by M3.
+not implemented by M4.
 
 ## Verification evidence
 
+M4, local, on branch `milestone-4`:
+- Full suite once at the end, with no kind cluster and no Compose project up: 530
+  total (525 plus the five new HealthTests), 524 passed, 6 skipped (the same six as
+  M3), 0 failed, 10m27s.
+- Release solution build: 0 warnings, 0 errors. `render_test.sh` prints `RENDER OK`.
+- Fresh cluster: `kind-up` and `kind-deploy` (two passes) then `smoke.sh
+  http://localhost:8080` printed `SMOKE OK` with all 12 pods Ready; a second
+  `kind-deploy` (single upgrade) and `helm uninstall` followed by `kind-deploy` both
+  succeeded (1032 s in total).
+- `kind-resilience.sh` printed `RESILIENCE OK` on three consecutive runs, twice: on
+  the Task 7 commit (689, 663 and 651 s) and again, on a fresh cluster, after the
+  audit fix that makes its checks fail closed (659, 721 and 496 s). Every run: no
+  payment Processing, ManualReview 0, trial balance 0, no failed gateway request in
+  the rolling restart (7 to 26 s rollouts with two Payments replicas).
+- Compose smoke on a fresh named project printed `SMOKE OK`; the project was brought
+  down without `-v`.
+- gitleaks clean; no vulnerable packages; the diff checks of the handoff passed.
+- Whole-branch review: no Critical or Important findings; the recommended Minor fixes
+  are in 347a531. Final audit of the shutdown and resilience changes: clean after
+  4bb03ff. Rulings and deferred findings: [M4 decisions](m4-decisions.md).
+
+M3:
 - Baseline full suite before M3: 504 of 505 passed, 11m19s. The one failure was a
   flake; the focused rerun was green (66 of 66).
 - Final full suite: 525 total, 519 passed, 6 skipped, 0 failed, 10m58s, without the
@@ -86,15 +116,15 @@ without deleting their data.
 
 ## Continuation instructions
 
-1. Open owner decisions before or alongside M4 (see also the open items in
-   [M3 decisions](m3-decisions.md)): confirm that `codeql` and dependency review
-   pass now that the repository is public; close the major Dependabot pull requests
-   and add a major-version ignore to `.github/dependabot.yml`, or accept them; check
-   the first nightly `k6-smoke` result; decide on a LICENSE file and on enabling
-   secret scanning with push protection.
-2. Then start at M4-T01. Read [ADR 0011](adr/0011-kubernetes-packaging.md) and the
-   next task's spec in [the plan](plan.md). Create the next branch from updated main.
-   `kind` and `helm` are not installed on the development machine yet; `kubectl` is.
+1. Finish M4 integration: push `milestone-4`, open a pull request, and check that
+   `build-test`, `security`, `codeql` and `compose-validate` pass. After the merge,
+   check the first `kind` job on main, then tick the last M4 checklist row. Open
+   items are in [M4 decisions](m4-decisions.md) (including binding kind's host ports
+   to `127.0.0.1`) and [M3 decisions](m3-decisions.md) (Dependabot major bumps,
+   nightly `k6-smoke`, LICENSE, secret scanning).
+2. Then start at M5-T01. Re-verify the Phase 2 versions in ADR 0000 first, as the
+   plan says, and read the next task's spec in [the plan](plan.md). Create the next
+   branch from updated main. `kind`, `helm` and `kubectl` are installed.
 3. Use one fresh named Compose project at a time and stop only that project. Never
    run `down -v`; preserve existing volumes. The system-test harness uses its own
    `ledgerline-systest` project and refuses another Ledgerline project, so stop the
@@ -105,10 +135,13 @@ without deleting their data.
 5. The user-owned `orchestrator-prompt.md` and `docs/plan-M3-HANDOFF.md` are tracked
    on main since 3564d0a; do not edit or delete them. The `.superpowers/` ledger
    stays out of every commit. Stage files by name.
-6. Do not repeat completed tasks or dispatch another M3 reviewer. Deferred items are
-   in [M3 decisions](m3-decisions.md).
+6. Do not repeat completed tasks or dispatch another M3 or M4 reviewer. Deferred
+   items are in [M3 decisions](m3-decisions.md) and [M4 decisions](m4-decisions.md).
+7. The kind cluster binds host ports 8080, 8081, 3000 and 8025, the same as Compose;
+   run one of them at a time. `scripts/kind-down.*` deletes only the `ledgerline`
+   cluster.
 
 Review and inherited minor findings: [M2 review](m2-review.md).
-All execution rulings and deferred costs: [M2 decisions](m2-decisions.md) and
-[M3 decisions](m3-decisions.md).
+All execution rulings and deferred costs: [M2 decisions](m2-decisions.md),
+[M3 decisions](m3-decisions.md) and [M4 decisions](m4-decisions.md).
 Full scope and remaining tasks: [implementation plan](plan.md).
