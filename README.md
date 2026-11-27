@@ -20,8 +20,8 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 | Design | Design, specs, ADRs, plan, walking skeleton | Done |
 | M1 | Accounts and Ledger, Payments, RabbitMQ, outbox and inbox, one command | Implemented and locally verified |
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
-| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented and reviewed on branch `milestone-3`; not yet merged or pushed |
-| M4 | Kubernetes with Helm and health checks | Implemented and reviewed on branch `milestone-4`; not yet merged or pushed |
+| M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented, reviewed and merged to `main` ([integration record](https://github.com/kubicix/ledgerline/pull/3)) |
+| M4 | Kubernetes with Helm and health checks | Implemented and reviewed; the cluster deploy, smoke flow and pod-deletion and rolling-restart resilience checks were verified on a local kind cluster |
 | M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
 | M6 | Blazor UI | Not started |
 
@@ -280,8 +280,8 @@ The infrastructure is dev-grade on purpose (ADR 0011). Limits:
   entry for the API. Keycloak runs in dev mode on `localhost:8081`.
 - The application images are tagged `:local` and loaded into the node, not pulled from a registry.
 
-The production path is managed or operator-run databases and brokers, an external secret store and an ingress with
-TLS; the reasoning is in [ADR 0011](docs/adr/0011-kubernetes-packaging.md). Details of the cluster, the two-pass deploy
+The production path is CloudNativePG, the RabbitMQ Cluster Operator and a managed Redis or Valkey, an external
+secret store and an ingress with TLS; the reasoning is in [ADR 0011](docs/adr/0011-kubernetes-packaging.md). Details of the cluster, the two-pass deploy
 and the resilience checks are in [docs/kubernetes.md](docs/kubernetes.md).
 
 ## Phase 2: event stream, read model, reconciliation

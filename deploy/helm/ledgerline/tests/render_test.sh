@@ -208,7 +208,7 @@ else
 fi
 
 
-# ---- Migration Jobs (M4-T04, section 0.1 C1) -------------------------------------------------------
+# ---- Migration Jobs (M4-T04, two-pass deploy, docs/kubernetes.md) -------------------------------------------------------
 MIGRATE_SERVICES="accounts payments risk notifications banksim"
 JOB_COUNT="$(grep -c '^Job .*-migrate$' "$WORK/default.list")"
 [ "$JOB_COUNT" -eq 5 ] || fail "expected 5 migration Jobs, found $JOB_COUNT"
@@ -266,7 +266,7 @@ else
   fail "helm template with services.risk.migrate=false failed"
 fi
 
-# ---- Two-pass deploy switch (section 0.1 C1): infrastructure only ------------------------------
+# ---- Two-pass deploy switch (docs/kubernetes.md, "Two passes on a first install"): infrastructure only ------------------------------
 if helm_render "$WORK/infra.yaml" --set infraOnly=true; then
   split_docs "$WORK/infra.yaml" "$WORK/infra"
   list_docs "$WORK/infra" >"$WORK/infra.list"

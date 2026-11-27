@@ -1,5 +1,5 @@
 {{- /*
-Keycloak (compose.yaml: keycloak), same settings as Compose (section 0.1 C2 of the M4 handoff): start-dev with
+Keycloak (compose.yaml: keycloak), same settings as Compose (see "Keycloak and the token issuer" in docs/kubernetes.md): start-dev with
 --import-realm, KC_HTTP_PORT 8081 and the fixed KC_HOSTNAME http://localhost:8081. The Service is a NodePort that
 the kind cluster maps to host port 8081, so a token obtained at localhost:8081 carries the same issuer string the
 services read from http://keycloak:8081/realms/ledgerline. The realm file (214 users) makes the first start slow,

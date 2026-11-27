@@ -59,8 +59,8 @@ kubectl version --client
 ## The cluster
 
 `deploy/kind/cluster.yaml` defines a cluster named `ledgerline` with one control-plane node. The kubectl context is
-`kind-ledgerline`. The node image is kind's default for v0.33.0 (`kindest/node:v1.37.0`); it is not pinned
-separately, so upgrading kind upgrades Kubernetes.
+`kind-ledgerline`. The node image is kind's default for v0.33.0 (`kindest/node:v1.37.0`, digest-pinned by kind); the CI job names the
+same image and digest explicitly. Upgrading kind upgrades Kubernetes, and the CI image line must be updated with it.
 
 The node maps four NodePorts to the host, using the same host ports as the Compose stack:
 
@@ -198,7 +198,7 @@ pod deleted and recreated, every service stayed `Ready` and the API kept answeri
 
 The script proves that deleting pods and a rolling restart during a workload lose no money (ADR 0011). It runs on a
 cluster prepared with `kind-up` and `kind-deploy`, and it can run again on the same cluster with no reset in between.
-It prints `RESILIENCE OK` and exits 0, or names the failed check and exits non-zero. One run took about 8.5
+It prints `RESILIENCE OK` and exits 0, or names the failed check and exits non-zero. Runs took 8.5 to 11.5
 minutes on a developer machine, mostly the two `kind-deploy` calls (2 to 3 minutes each, they rebuild and load the
 images) and the two k6 runs (about 1.5 minutes each).
 
