@@ -24,7 +24,7 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1000", Justification = "The plan requires ServiceHost<TProgram>.StartAsync as the shared test host API.")]
     public static async Task<ServiceHost<TProgram>> StartAsync(InfrastructureFixture infrastructure,
-        string databasePrefix, Action<IServiceCollection>? overrides = null)
+        string databasePrefix, Action<IServiceCollection>? overrides = null, IReadOnlyDictionary<string, string?>? settings = null)
     {
         var assembly = typeof(TProgram).Assembly;
         var contextType = ContextType;
@@ -33,15 +33,15 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
             ?? throw new InvalidOperationException("The service migration entry point is missing.");
         var cs = await DatabaseFactory.CreateMigratedAsync(infrastructure, databasePrefix, contextType,
             connection => (Task)migrate.Invoke(null, [connection, CancellationToken.None])!);
-        return await StartOnDatabaseAsync(infrastructure, cs, overrides);
+        return await StartOnDatabaseAsync(infrastructure, cs, overrides, settings);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1000", Justification = "Shared-database replica and crash tests require the generic service host factory.")]
     public static async Task<ServiceHost<TProgram>> StartOnDatabaseAsync(InfrastructureFixture infrastructure,
-        string cs, Action<IServiceCollection>? overrides = null)
+        string cs, Action<IServiceCollection>? overrides = null, IReadOnlyDictionary<string, string?>? settings = null)
     {
         var rabbitMqUri = await infrastructure.CreateRabbitMqUriAsync(new NpgsqlConnectionStringBuilder(cs).Database!);
-        var factory = new ConfiguredFactory(rabbitMqUri, cs, infrastructure.RedisConnectionString, overrides);
+        var factory = new ConfiguredFactory(rabbitMqUri, cs, infrastructure.RedisConnectionString, overrides, settings);
         try
         {
             _ = factory.Services;
@@ -73,11 +73,14 @@ public sealed class ServiceHost<TProgram> : IAsyncDisposable where TProgram : cl
     }
 
     private sealed class ConfiguredFactory(string rabbitMqUri, string cs, string redisConnectionString,
-        Action<IServiceCollection>? overrides) : WebApplicationFactory<TProgram>
+        Action<IServiceCollection>? overrides, IReadOnlyDictionary<string, string?>? settings) : WebApplicationFactory<TProgram>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
+            // Host settings reach Program as arguments, so code that reads them before Build (such as a messaging
+            // switch) sees them; ConfigureAppConfiguration below is applied only at Build.
+            foreach (var (key, value) in settings ?? new Dictionary<string, string?>()) builder.UseSetting(key, value);
             builder.UseContentRoot(Path.GetDirectoryName(typeof(TProgram).Assembly.Location)!);
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {

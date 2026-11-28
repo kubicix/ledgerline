@@ -852,7 +852,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T03: Accounts and Payments publish to Kafka
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 2 and 5 (accounts topic). **Depends:** M5-T02.
 **Files:** Modify Accounts `Program.cs` (`JournalEntryPosted` expanded per line to `ledgerline.ledger.entries.v1` keyed by `accountId`; `AccountOpened` to `ledgerline.accounts.events.v1`), Payments `Program.cs` (all `payments.event.*` to `ledgerline.payments.events.v1` keyed by `paymentId`); contracts: `JournalEntryLinePosted.cs` (`accounts.event.journal-entry-line-posted.v1`: entry fields plus one line and `lineNo`) with sample. Kafka is optional per configuration (`Messaging:Kafka:Enabled`, default false) so M1 to M4 setups keep working. Test `tests/Ledgerline.Accounts.IntegrationTests/KafkaPublishingTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/KafkaPublishingTests.cs`.

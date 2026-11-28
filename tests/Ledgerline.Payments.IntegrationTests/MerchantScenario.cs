@@ -71,7 +71,8 @@ internal sealed class MerchantScenario(ServiceHost<AccountsProgram> accounts, Se
     }
     public async ValueTask DisposeAsync() { await probe.DisposeAsync(); await host.DisposeAsync(); await accounts.DisposeAsync(); }
 
-    internal static async Task<MerchantScenario> StartAsync(InfrastructureFixture infrastructure, TimeSpan? ttl = null, Action<IServiceCollection>? accountOverrides = null, Action<IServiceCollection>? paymentOverrides = null)
+    internal static async Task<MerchantScenario> StartAsync(InfrastructureFixture infrastructure, TimeSpan? ttl = null, Action<IServiceCollection>? accountOverrides = null, Action<IServiceCollection>? paymentOverrides = null,
+        IReadOnlyDictionary<string, string?>? paymentSettings = null)
     {
         var accounts = await ServiceHost<AccountsProgram>.StartAsync(infrastructure, "merchant_accounts", accountOverrides);
         var uri = accounts.Services.GetRequiredService<RabbitMqOptions>().Uri;
@@ -81,7 +82,7 @@ internal sealed class MerchantScenario(ServiceHost<AccountsProgram> accounts, Se
             services.AddSingleton(new PaymentSagaOptions { RiskEnabled = true, BankEnabled = false, AuthorizationTtl = ttl ?? TimeSpan.FromDays(7) });
             services.AddSingleton(new TimeoutOptions { PollIntervalMs = 20 });
             paymentOverrides?.Invoke(services);
-        });
+        }, paymentSettings);
         var probe = await BrokerProbe.CreateAsync(uri, "accounts.event.#", "risk.command.#", "payments.event.#");
         var owner = Guid.NewGuid();
         var merchantOwner = Guid.NewGuid();
