@@ -18,6 +18,16 @@ release=ledgerline
 chart=deploy/helm/ledgerline
 images=(ledgerline-accounts:local ledgerline-payments:local ledgerline-risk:local ledgerline-notifications:local
   ledgerline-banksim:local ledgerline-gateway:local)
+profiles=(--profile app)
+# Phase 2 (docs/kubernetes.md): with --set phase2.enabled=true among the arguments, the Reporting and Reconciliation
+# images are built and loaded too. Without it nothing changes.
+for arg in "$@"; do
+  if [[ "$arg" == *phase2.enabled=true* ]]; then
+    profiles=(--profile app --profile phase2)
+    images+=(ledgerline-reporting:local ledgerline-reconciliation:local)
+    break
+  fi
+done
 
 for tool in docker kind helm kubectl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool not found on PATH, see docs/kubernetes.md" >&2; exit 1; }
@@ -28,7 +38,7 @@ if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
 fi
 
 echo "== Building images"
-docker compose --profile app build
+docker compose "${profiles[@]}" build
 
 echo "== Loading images into kind cluster '$cluster'"
 kind load docker-image "${images[@]}" --name "$cluster"

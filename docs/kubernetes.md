@@ -159,6 +159,33 @@ that passes as long as the Mailpit pod keeps its mail. After `helm uninstall` Ma
 a volume), so the replayed operations send no new mail and the email check fails. After an uninstall or an
 interrupted smoke run, prove the flow on a freshly created cluster: `./scripts/kind-down.sh && ./scripts/kind-up.sh`.
 
+### Phase 2 (`phase2.enabled`)
+
+`phase2.enabled` (default `false`) adds the M5 Phase 2 parts, the Helm twin of Compose profile `phase2` with
+`compose.phase2.yaml`: Kafka (single-node KRaft StatefulSet, `apache/kafka:4.4.0`) and MongoDB (StatefulSet, `mongo:9.0`),
+both ClusterIP only; a `kafka-topics` hook Job that creates the topics as the Compose `kafka-init` job does; the
+`reporting` and `reconciliation` services (Reconciliation with its migration Job); Kafka publishing in Accounts and
+Payments; and the operations address in Notifications. No NodePort and no kind port mapping is added: Reporting and
+Reconciliation are reached through the gateway under `/api/reporting/...` and `/api/reconciliation/...`. With the value
+off the chart renders exactly the default release, and those two routes answer `503`.
+
+Deploy it as a first install, on a new cluster or after `helm uninstall`:
+
+```bash
+./scripts/kind-down.sh && ./scripts/kind-up.sh
+./scripts/kind-deploy.sh --set phase2.enabled=true
+```
+
+`kind-deploy` builds and loads the Reporting and Reconciliation images too when the arguments contain
+`phase2.enabled=true`, and passes the value to both passes. Pass 1 (`infraOnly=true`) then also installs Kafka, MongoDB
+and the `reconciliation-secrets` Secret, so the pass 2 hooks (`kafka-topics`, `reconciliation-migrate`) find them.
+
+Switching Phase 2 on by upgrading a running default release is not supported. That upgrade's `pre-upgrade` hooks run
+before any regular resource of the same upgrade is created, so `kafka-topics` would wait for a Kafka that does not exist
+yet and `reconciliation-migrate` for a Secret that does not exist yet, and the upgrade times out. Uninstall and deploy
+again (`helm --kube-context kind-ledgerline uninstall ledgerline`, then the `kind-deploy` above), or start from a new
+cluster.
+
 ### Keycloak and the token issuer
 
 The smoke script and the k6 scripts request tokens from Keycloak at `http://localhost:8081/realms/ledgerline`, from

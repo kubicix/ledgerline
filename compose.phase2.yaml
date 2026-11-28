@@ -1,0 +1,25 @@
+# Phase 2 (M5) override for compose.yaml. Use it together with both profiles:
+#   docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 up --build -d --wait
+# Kafka, MongoDB, Reporting and Reconciliation are defined in compose.yaml under profile phase2. This file only changes
+# services of profile app: Accounts and Payments also publish their events to Kafka (Messaging:Kafka:Enabled is off by
+# default) once the topics exist, and Notifications gets the operations address for reconciliation mismatch mails.
+# No Reconciliation option is shortened here: the defaults of reconciliation.md apply.
+# Without this file `docker compose --profile app up` runs exactly the M1 to M4 system. Local development values only.
+services:
+  accounts:
+    environment:
+      Messaging__Kafka__Enabled: "true"
+      Messaging__Kafka__BootstrapServers: kafka:9092
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+
+  payments:
+    environment:
+      Messaging__Kafka__Enabled: "true"
+      Messaging__Kafka__BootstrapServers: kafka:9092
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+
+  notifications:
+    environment:
+      Notifications__OperationsEmail: operations@ledgerline.test

@@ -1,0 +1,87 @@
+{{- /*
+MongoDB (compose.yaml: mongo), Phase 2 only: Reporting's read model store. A StatefulSet with a PVC for /data/db, same
+image as Compose, running as the image's mongodb user. No authentication, as in compose.yaml; the Service is ClusterIP
+only. Probes use the Compose health check.
+*/ -}}
+{{- $m := .Values.infra.mongo }}
+{{- if and .Values.phase2.enabled $m.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "mongo" "root" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "mongo" "root" $) | nindent 4 }}
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "mongo" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: mongo
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "mongo" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "mongo" "root" $) | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $m.runAsUser | nindent 8 }}
+      containers:
+        - name: mongo
+          image: {{ $m.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: mongo
+              containerPort: 27017
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          # The Compose health check. Each exec starts mongosh, hence the generous timeouts.
+          startupProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 30
+            failureThreshold: 4
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ledgerline.selectorLabels" (dict "name" "mongo" "root" $) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $m.storage }}
+{{- end }}

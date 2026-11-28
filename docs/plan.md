@@ -934,7 +934,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T11: Phase 2 deployment, system test, README
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M5-T06, M5-T10.
 **Files:** Dockerfiles for Reporting and Reconciliation; `compose.yaml` (profile `phase2`: both services with migrate job for Reconciliation, `Messaging__Kafka__Enabled=true` for Accounts and Payments when the profile is active through an override file `compose.phase2.yaml` or environment interpolation; choose the override file); Gateway `appsettings.json` (two Phase 2 routes); Helm `values.yaml` (`phase2.enabled`, Kafka and MongoDB infra templates, two services); `tests/Ledgerline.SystemTests/Phase2SystemTests.cs`; `README.md` (Phase 2 section, CQRS note from `reporting.md` section 8).

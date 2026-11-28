@@ -1,0 +1,170 @@
+{{- /*
+Kafka (compose.yaml: kafka and kafka-init), Phase 2 only. A single-node KRaft StatefulSet, broker and controller in one
+process, same image as Compose. Services reach it as kafka:9092, the advertised address of the INTERNAL listener. The
+controller votes for itself on localhost:9093. The readiness command is the Compose health check, run against a PROBE
+listener that advertises localhost:9095: a command that bootstraps on INTERNAL would follow the advertised kafka:9092,
+and the kafka Service has no endpoint until the pod is Ready, so readiness would never pass. The data directory is set
+explicitly to the volume. The kafka-topics Job below is the Compose kafka-init job: it creates the three event topics
+(6 partitions, unlimited retention) and Reporting's dead-letter topic before any service of the release starts. Like
+rabbitmq-definitions it is a pre-install,pre-upgrade hook with weight -1, and it reads no Secret or ConfigMap.
+*/ -}}
+{{- $k := .Values.infra.kafka }}
+{{- if and .Values.phase2.enabled $k.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "kafka" "root" $) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ledgerline.selectorLabels" (dict "name" "kafka" "root" $) | nindent 4 }}
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "kafka" "root" $) | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: kafka
+  selector:
+    matchLabels:
+      {{- include "ledgerline.selectorLabels" (dict "name" "kafka" "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "kafka" "root" $) | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $k.runAsUser | nindent 8 }}
+      containers:
+        - name: kafka
+          image: {{ $k.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: INTERNAL://:9092,CONTROLLER://:9093,PROBE://:9095
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: INTERNAL://kafka:9092,PROBE://localhost:9095
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,PROBE:PLAINTEXT
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: INTERNAL
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@localhost:9093
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $k.resources | nindent 12 }}
+          # The Compose health check. Each exec starts a JVM, hence the generous timeouts.
+          startupProbe:
+            exec:
+              command: ["/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9095"]
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: kafka
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9095"]
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ledgerline.selectorLabels" (dict "name" "kafka" "root" $) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $k.storage }}
+{{- if not .Values.infraOnly }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+  labels:
+    {{- include "ledgerline.labels" (dict "name" "kafka-topics" "root" $) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      # Labelled kafka-topics, so the kafka Service and StatefulSet selectors never match this pod.
+      labels:
+        {{- include "ledgerline.labels" (dict "name" "kafka-topics" "root" $) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- include "ledgerline.infra.podSecurityContext" $k.runAsUser | nindent 8 }}
+      containers:
+        - name: create
+          image: {{ $k.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # The kafka-init script of compose.yaml. Safe to run again: existing topics are left as they are.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              topics=/opt/kafka/bin/kafka-topics.sh
+              for topic in ledgerline.ledger.entries.v1 ledgerline.payments.events.v1 ledgerline.accounts.events.v1; do
+                $topics --bootstrap-server kafka:9092 --create --if-not-exists --topic $topic --partitions 6 --replication-factor 1 --config retention.ms=-1 --config cleanup.policy=delete
+              done
+              $topics --bootstrap-server kafka:9092 --create --if-not-exists --topic ledgerline.reporting.dead.v1 --partitions 1 --replication-factor 1 --config retention.ms=-1 --config cleanup.policy=delete
+          securityContext:
+            {{- include "ledgerline.infra.containerSecurityContext" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+{{- end }}
+{{- end }}

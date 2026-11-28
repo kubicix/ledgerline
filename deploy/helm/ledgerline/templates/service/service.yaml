@@ -1,5 +1,5 @@
 {{- if not .Values.infraOnly }}
-{{- range $name, $svc := .Values.services }}
+{{- range $name, $svc := include "ledgerline.services" . | fromYaml }}
 ---
 apiVersion: v1
 kind: Service

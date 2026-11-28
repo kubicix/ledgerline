@@ -100,11 +100,8 @@ done
 [ "$DEPLOY_COUNT" -eq 6 ] || fail "expected 6 application Deployments, found $DEPLOY_COUNT"
 
 # ---- every application Deployment: probes, security, resources, shutdown --------------------------------
-for f in "$WORK"/default/doc*.yaml; do
-  [ "$(doc_kind "$f")" = "Deployment" ] || continue
-  n="$(doc_name "$f")"
-  is_service "$n" || continue
-
+check_app_deployment() { # check_app_deployment <file> <service name>
+  local f="$1" n="$2" startup live ready resources limits prestop
   startup="$(block "$f" startupProbe)"
   live="$(block "$f" livenessProbe)"
   ready="$(block "$f" readinessProbe)"
@@ -132,6 +129,12 @@ for f in "$WORK"/default/doc*.yaml; do
   grep -q 'seconds: 5$' <<<"$prestop" || fail "$n: preStop sleep must be 5 seconds"
   grep -q 'imagePullPolicy: IfNotPresent' "$f" || fail "$n: imagePullPolicy must be stated"
   grep -Eq 'image: "?ledgerline-'"$n"':local' "$f" || fail "$n: image must be ledgerline-$n:local"
+}
+for f in "$WORK"/default/doc*.yaml; do
+  [ "$(doc_kind "$f")" = "Deployment" ] || continue
+  n="$(doc_name "$f")"
+  is_service "$n" || continue
+  check_app_deployment "$f" "$n"
 done
 
 # ---- Application Services: only the gateway is a NodePort, names match Compose -------------------------
@@ -592,6 +595,192 @@ done
 for n in $INFRA; do
   grep -qx "Service $n" "$WORK/infra.list" || fail "infraOnly: Service $n must render"
 done
+
+# ---- Phase 2 (M5-T11): phase2.enabled -------------------------------------------------------------------------------
+PHASE2_SERVICES="reporting reconciliation"
+PHASE2_INFRA="kafka mongo"
+TOPICS="ledgerline.ledger.entries.v1 ledgerline.payments.events.v1 ledgerline.accounts.events.v1"
+
+# Off (the default render above): no Phase 2 object renders and no service carries a Phase 2 setting.
+for n in $PHASE2_SERVICES $PHASE2_INFRA; do
+  grep -Eq "^[A-Za-z]+ $n(-[a-z]+)?\$" "$WORK/default.list" && fail "phase2 off: objects of $n must not render"
+  grep -Eq "^[A-Za-z]+ $n(-[a-z]+)?\$" "$WORK/infra.list" && fail "phase2 off, infraOnly: objects of $n must not render"
+done
+grep -Eq 'Messaging__Kafka|Notifications__OperationsEmail' "$WORK"/default/cfg-*.yaml && fail "phase2 off: a ConfigMap carries a Phase 2 setting"
+
+if helm_render "$WORK/p2.yaml" --set phase2.enabled=true; then
+  split_docs "$WORK/p2.yaml" "$WORK/p2"
+  list_docs "$WORK/p2" >"$WORK/p2.list"
+  for f in "$WORK"/p2/doc*.yaml; do
+    [ "$(doc_kind "$f")" = "ConfigMap" ] && cp "$f" "$WORK/p2/cfg-$(doc_name "$f" | sed 's/-config$//').yaml"
+    [ "$(doc_kind "$f")" = "Secret" ] && cp "$f" "$WORK/p2/sec-$(doc_name "$f" | sed 's/-secrets$//').yaml"
+  done
+  p2_cfg() { grep -q -- "$2" "$WORK/p2/cfg-$1.yaml" 2>/dev/null; }
+  p2_sec() { grep -q -- "$2" "$WORK/p2/sec-$1.yaml" 2>/dev/null; }
+
+  # The two services: same Deployment template and checks as the other six, ClusterIP Services, no new NodePort.
+  [ "$(grep -c '^Deployment ' "$WORK/p2.list")" -eq "$(($(grep -c '^Deployment ' "$WORK/default.list") + 2))" ] \
+    || fail "phase2: expected exactly 2 Deployments more than the default render"
+  for svc in $SERVICES $PHASE2_SERVICES; do
+    grep -qx "Deployment $svc" "$WORK/p2.list" || fail "phase2: Deployment $svc is not rendered"
+  done
+  for svc in $PHASE2_SERVICES; do
+    if f="$(find_doc "$WORK/p2" Deployment "$svc")"; then check_app_deployment "$f" "$svc"; fi
+    if f="$(find_doc "$WORK/p2" Service "$svc")"; then
+      grep -q 'type: ClusterIP' "$f" || fail "phase2: Service $svc must be ClusterIP"
+      grep -q 'nodePort' "$f" && fail "phase2: Service $svc must not set a nodePort"
+      grep -Eq '^ *port: 8080$' "$f" || fail "phase2: Service $svc must expose port 8080"
+    else
+      fail "phase2: Service $svc is not rendered"
+    fi
+    for key in 'Auth__Authority: "http://keycloak:8081/realms/ledgerline"' 'Auth__Audience: "ledgerline-api"' \
+      'Auth__RequireHttpsMetadata: "false"' 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-lgtm:4317"'; do
+      p2_cfg "$svc" "$key" || fail "phase2: $svc ConfigMap misses $key"
+    done
+    if grep -Eq 'Password=|amqp://|ApiKey' "$WORK/p2/cfg-$svc.yaml"; then fail "phase2: $svc ConfigMap carries a secret value"; fi
+  done
+  P2_NODEPORTS="$(grep -h 'nodePort:' "$WORK"/p2/doc*.yaml | sed 's/.*nodePort: *//' | sort -n | tr '\n' ' ')"
+  [ "$P2_NODEPORTS" = "$KIND_NODEPORTS" ] || fail "phase2: nodePorts ($P2_NODEPORTS) must stay those of deploy/kind/cluster.yaml ($KIND_NODEPORTS)"
+
+  # Settings, as in compose.yaml and compose.phase2.yaml.
+  for svc in accounts payments; do
+    p2_cfg "$svc" 'Messaging__Kafka__Enabled: "true"' || fail "phase2: $svc must enable Kafka publishing"
+    p2_cfg "$svc" 'Messaging__Kafka__BootstrapServers: "kafka:9092"' || fail "phase2: $svc Kafka bootstrap servers"
+  done
+  p2_cfg notifications 'Notifications__OperationsEmail: "operations@ledgerline.test"' || fail "phase2: notifications operations address"
+  p2_cfg reporting 'ConnectionStrings__Mongo: "mongodb://mongo:27017"' || fail "phase2: reporting ConnectionStrings__Mongo"
+  p2_cfg reporting 'Reporting__Kafka__BootstrapServers: "kafka:9092"' || fail "phase2: reporting Kafka bootstrap servers"
+  [ ! -f "$WORK/p2/sec-reporting.yaml" ] || fail "phase2: reporting has no credentials and no Secret"
+  p2_cfg reconciliation 'Reconciliation__Kafka__BootstrapServers: "kafka:9092"' || fail "phase2: reconciliation Kafka bootstrap servers"
+  p2_cfg reconciliation 'Bank__BaseUrl: "http://banksim:8080"' || fail "phase2: reconciliation Bank__BaseUrl"
+  p2_cfg reconciliation 'ConnectionStrings__Redis: "redis:6379"' || fail "phase2: reconciliation ConnectionStrings__Redis"
+  p2_sec reconciliation 'ConnectionStrings__Database: "Host=postgres;Database=reconciliation_db;Username=reconciliation;Password=reconciliation_dev;Maximum Pool Size=40"' \
+    || fail "phase2: reconciliation Secret ConnectionStrings__Database"
+  p2_sec reconciliation 'Messaging__RabbitMq__Uri: "amqp://ledgerline:ledgerline_dev@rabbitmq:5672/"' || fail "phase2: reconciliation Secret Messaging__RabbitMq__Uri"
+  p2_sec reconciliation 'Bank__ApiKey: "ledgerline-bank-local-dev"' || fail "phase2: reconciliation Secret Bank__ApiKey"
+
+  # Migration Jobs: Reconciliation has one (same checks as the other five), Reporting none.
+  [ "$(grep -c '^Job .*-migrate$' "$WORK/p2.list")" -eq 6 ] || fail "phase2: expected 6 migration Jobs"
+  grep -qx 'Job reporting-migrate' "$WORK/p2.list" && fail "phase2: reporting must not have a migration Job"
+  if f="$(find_doc "$WORK/p2" Job reconciliation-migrate)"; then
+    grep -Eq '"?helm.sh/hook"?: "?pre-install,pre-upgrade"?$' "$f" || fail "reconciliation-migrate: hook must be pre-install,pre-upgrade"
+    grep -Eq 'image: "?ledgerline-reconciliation:local"?$' "$f" || fail "reconciliation-migrate: image must be ledgerline-reconciliation:local"
+    grep -q 'args: \["migrate"\]$' "$f" || fail "reconciliation-migrate: args must be [\"migrate\"]"
+    grep -q 'name: reconciliation-secrets' <<<"$(block "$f" env)" || fail "reconciliation-migrate: database settings must come from reconciliation-secrets"
+    grep -q 'pg_isready' <<<"$(block "$f" initContainers)" || fail "reconciliation-migrate: init container must wait with pg_isready"
+    grep -Eq "^ *app.kubernetes.io/name: reconciliation\$" "$f" && fail "reconciliation-migrate: pod labels must not match the reconciliation selector"
+  else
+    fail "phase2: Job reconciliation-migrate is not rendered"
+  fi
+
+  # Kafka and MongoDB: StatefulSets with a PVC, same images as compose.yaml, probes, limits, non-root, ClusterIP only.
+  for n in $PHASE2_INFRA; do
+    if f="$(find_doc "$WORK/p2" StatefulSet "$n")"; then
+      grep -q 'volumeClaimTemplates:' "$f" || fail "$n: StatefulSet needs volumeClaimTemplates"
+      grep -q "serviceName: $n\$" "$f" || fail "$n: StatefulSet needs serviceName $n"
+      [ -n "$(block "$f" startupProbe)" ] || fail "$n: no startupProbe"
+      [ -n "$(block "$f" livenessProbe)" ] || fail "$n: no livenessProbe"
+      [ -n "$(block "$f" readinessProbe)" ] || fail "$n: no readinessProbe"
+      grep -q 'runAsNonRoot: true' "$f" || fail "$n: runAsNonRoot must be true"
+      grep -Eq 'runAsUser: [1-9][0-9]*' "$f" || fail "$n: runAsUser must be a non-zero uid"
+      grep -q 'allowPrivilegeEscalation: false' "$f" || fail "$n: allowPrivilegeEscalation must be false"
+      grep -q -- '- ALL' "$f" || fail "$n: capabilities must drop ALL"
+      grep -q 'requests:' <<<"$(block "$f" resources)" || fail "$n: resources.requests missing"
+      grep -q 'memory:' <<<"$(block "$f" limits)" || fail "$n: resources.limits.memory missing"
+      grep -q 'imagePullPolicy: IfNotPresent' "$f" || fail "$n: imagePullPolicy must be stated"
+    else
+      fail "phase2: StatefulSet $n is not rendered"
+    fi
+    if f="$(find_doc "$WORK/p2" Service "$n")"; then
+      grep -q 'type: ClusterIP' "$f" || fail "Service $n must be ClusterIP"
+      grep -q 'nodePort' "$f" && fail "Service $n must not set a nodePort"
+    else
+      fail "phase2: Service $n is not rendered"
+    fi
+  done
+  if f="$(find_doc "$WORK/p2" StatefulSet kafka)"; then
+    grep -Eq 'image: "?apache/kafka:4.4.0"?$' "$f" || fail "kafka: image must be apache/kafka:4.4.0"
+    grep -q 'kafka-broker-api-versions.sh' <<<"$(block "$f" readinessProbe)" || fail "kafka: readiness must use kafka-broker-api-versions.sh"
+    grep -q 'value: INTERNAL://kafka:9092' "$f" || fail "kafka: INTERNAL must advertise kafka:9092, the Service name"
+    grep -Eq 'value: "?false"?$' <<<"$(grep -A1 'name: KAFKA_AUTO_CREATE_TOPICS_ENABLE' "$f")" || fail "kafka: topic auto-creation must be off"
+    grep -q 'mountPath: /var/lib/kafka/data$' "$f" || fail "kafka: data volume must mount at /var/lib/kafka/data"
+  fi
+  if f="$(find_doc "$WORK/p2" StatefulSet mongo)"; then
+    grep -Eq 'image: "?mongo:9.0"?$' "$f" || fail "mongo: image must be mongo:9.0"
+    grep -q 'mongosh' <<<"$(block "$f" readinessProbe)" || fail "mongo: readiness must use mongosh"
+    grep -q 'mountPath: /data/db$' "$f" || fail "mongo: data volume must mount at /data/db"
+  fi
+  if f="$(find_doc "$WORK/p2" Service kafka)"; then grep -Eq '^ *port: 9092$' "$f" || fail "Service kafka must expose 9092"; fi
+  if f="$(find_doc "$WORK/p2" Service mongo)"; then grep -Eq '^ *port: 27017$' "$f" || fail "Service mongo must expose 27017"; fi
+
+  # Topics (compose.yaml: kafka-init), created by a hook that runs before any service of the release starts.
+  if f="$(find_doc "$WORK/p2" Job kafka-topics)"; then
+    grep -Eq '"?helm.sh/hook"?: "?pre-install,pre-upgrade"?$' "$f" || fail "kafka-topics: hook must be pre-install,pre-upgrade"
+    grep -Eq '"?helm.sh/hook-weight"?: "?-1"?$' "$f" || fail "kafka-topics: hook-weight must be -1 (before the migrations)"
+    grep -Eq '"?helm.sh/hook-delete-policy"?: "?before-hook-creation,hook-succeeded"?$' "$f" \
+      || fail "kafka-topics: hook-delete-policy must be before-hook-creation,hook-succeeded"
+    grep -q '^  backoffLimit: 6$' "$f" || fail "kafka-topics: backoffLimit must be 6"
+    grep -q 'restartPolicy: Never$' "$f" || fail "kafka-topics: restartPolicy must be Never"
+    grep -Eq 'image: "?apache/kafka:4.4.0"?$' "$f" || fail "kafka-topics: image must be infra.kafka.image"
+    for t in $TOPICS; do grep -q "$t" "$f" || fail "kafka-topics: topic $t missing"; done
+    grep -q -- '--partitions 6 --replication-factor 1 --config retention.ms=-1' "$f" || fail "kafka-topics: event topics need 6 partitions and retention.ms=-1"
+    grep -q -- '--topic ledgerline.reporting.dead.v1 --partitions 1 --replication-factor 1 --config retention.ms=-1' "$f" \
+      || fail "kafka-topics: the dead-letter topic needs 1 partition and retention.ms=-1"
+    grep -Eq "^ *app.kubernetes.io/name: kafka\$" "$f" && fail "kafka-topics: pod labels must not match the kafka selector"
+    grep -q 'runAsNonRoot: true' "$f" || fail "kafka-topics: runAsNonRoot must be true"
+    grep -q 'allowPrivilegeEscalation: false' "$f" || fail "kafka-topics: allowPrivilegeEscalation must be false"
+    grep -q '^ *limits:' "$f" || fail "kafka-topics: resource limits missing"
+  else
+    fail "phase2: Job kafka-topics is not rendered"
+  fi
+
+  # infra.<name>.enabled=false removes that component only.
+  if helm_render "$WORK/p2nokafka.yaml" --set phase2.enabled=true --set infra.kafka.enabled=false; then
+    split_docs "$WORK/p2nokafka.yaml" "$WORK/p2nokafka"
+    list_docs "$WORK/p2nokafka" >"$WORK/p2nokafka.list"
+    grep -Eq '^[A-Za-z]+ kafka(-[a-z]+)?$' "$WORK/p2nokafka.list" && fail "infra.kafka.enabled=false: Kafka objects still render"
+    grep -qx 'StatefulSet mongo' "$WORK/p2nokafka.list" || fail "infra.kafka.enabled=false: mongo must still render"
+    grep -qx 'Deployment reconciliation' "$WORK/p2nokafka.list" || fail "infra.kafka.enabled=false: the services must still render"
+  else
+    cat "$WORK/p2nokafka.yaml.err" >&2
+    fail "helm template with phase2.enabled=true and infra.kafka.enabled=false failed"
+  fi
+else
+  cat "$WORK/p2.yaml.err" >&2
+  fail "helm template --set phase2.enabled=true failed"
+fi
+
+# Phase 2 with the infrastructure-only pass (handoff C2): Kafka, MongoDB and every Secret and ConfigMap the Phase 2
+# render's hook Jobs read must exist before pass 2 runs those hooks.
+if helm_render "$WORK/p2infra.yaml" --set phase2.enabled=true --set infraOnly=true; then
+  split_docs "$WORK/p2infra.yaml" "$WORK/p2infra"
+  list_docs "$WORK/p2infra" >"$WORK/p2infra.list"
+  for svc in $SERVICES $PHASE2_SERVICES; do
+    grep -qx "Deployment $svc" "$WORK/p2infra.list" && fail "phase2 infraOnly: Deployment $svc must not render"
+  done
+  grep -q '^Job ' "$WORK/p2infra.list" && fail "phase2 infraOnly: no Job may render"
+  for n in $PHASE2_INFRA; do
+    grep -qx "StatefulSet $n" "$WORK/p2infra.list" || fail "phase2 infraOnly: StatefulSet $n must render"
+    grep -qx "Service $n" "$WORK/p2infra.list" || fail "phase2 infraOnly: Service $n must render"
+  done
+  grep -qx 'Secret reconciliation-secrets' "$WORK/p2infra.list" || fail "phase2 infraOnly: Secret reconciliation-secrets must render"
+  P2_JOBS=0
+  for f in "$WORK"/p2/doc*.yaml; do
+    [ "$(doc_kind "$f")" = "Job" ] || continue
+    j="$(doc_name "$f")"
+    P2_JOBS=$((P2_JOBS + 1))
+    refs="$(referenced_names "$f")"
+    # kafka-topics reads nothing; every other hook Job reads at least one Secret or ConfigMap.
+    [ -n "$refs" ] || [ "$j" = "kafka-topics" ] || fail "reference extractor found nothing in phase2 hook Job $j"
+    for ref in $refs; do
+      grep -Eqx "(Secret|ConfigMap) $ref" "$WORK/p2infra.list" || fail "phase2 hook Job $j references $ref, which infraOnly does not render"
+    done
+  done
+  [ "$P2_JOBS" -eq 8 ] || fail "phase2 infraOnly reference check must see 8 hook Jobs, saw $P2_JOBS"
+else
+  cat "$WORK/p2infra.yaml.err" >&2
+  fail "helm template --set phase2.enabled=true --set infraOnly=true failed"
+fi
 
 if [ "$FAILURES" -ne 0 ]; then
   echo "RENDER FAILED ($FAILURES failure(s))" >&2

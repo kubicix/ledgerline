@@ -39,6 +39,8 @@ public sealed class GatewayTests
     [InlineData("payments/123/capture", "payments/123/capture")]
     [InlineData("risk/rules", "risk/rules")]
     [InlineData("notifications", "notifications")]
+    [InlineData("reporting/accounts/123/statement", "accounts/123/statement")]
+    [InlineData("reconciliation/runs/2026-11-13/items", "runs/2026-11-13/items")]
     public async Task Routes_map_public_paths_to_upstream_paths(string path, string expected)
     {
         await using var scenario = await Scenario.StartAsync();
@@ -65,6 +67,36 @@ public sealed class GatewayTests
         using var response = await scenario.Client.GetAsync("/api/risk/rules", TestContext.Current.CancellationToken);
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         scenario.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Reconciliation_route_denies_customer_with_403()
+    {
+        await using var scenario = await Scenario.StartAsync();
+        scenario.Client.DefaultRequestHeaders.Authorization = new("Bearer", TestTokens.Create(Guid.NewGuid(), "customer", null));
+        using var response = await scenario.Client.GetAsync("/api/reconciliation/runs", TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        scenario.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Phase2_routes_without_their_services_return_503_and_leave_the_rest_working()
+    {
+        // As in the default deployment: no reporting or reconciliation host exists.
+        await using var scenario = await Scenario.StartAsync(new()
+        {
+            ["ReverseProxy:Clusters:reporting:Destinations:primary:Address"] = "http://127.0.0.1:1",
+            ["ReverseProxy:Clusters:reconciliation:Destinations:primary:Address"] = "http://127.0.0.1:1"
+        });
+        foreach (var path in new[] { "/api/reporting/accounts/123/statement", "/api/reconciliation/runs" })
+        {
+            using var failed = await scenario.Client.GetAsync(path, TestContext.Current.CancellationToken);
+            failed.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        }
+        using var healthy = await scenario.Client.GetAsync("/api/accounts", TestContext.Current.CancellationToken);
+        healthy.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var ready = await scenario.Client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        ready.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -194,7 +226,7 @@ public sealed class GatewayTests
             var address = upstream.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             var config = new Dictionary<string, string?> { ["Auth:Mode"] = "TestKey", ["Auth:Authority"] = TestTokens.Issuer,
                 ["Auth:Audience"] = "ledgerline-api", ["Auth:TestSigningKey"] = TestTokens.SigningKey };
-            foreach (var cluster in new[] { "accounts", "payments", "risk", "notifications" })
+            foreach (var cluster in new[] { "accounts", "payments", "risk", "notifications", "reporting", "reconciliation" })
                 config[$"ReverseProxy:Clusters:{cluster}:Destinations:primary:Address"] = address;
             foreach (var pair in overrides ?? []) config[pair.Key] = pair.Value;
             var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web.UseEnvironment("Testing")

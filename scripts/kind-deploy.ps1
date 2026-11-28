@@ -17,6 +17,13 @@ $Chart = Join-Path $Root 'deploy/helm/ledgerline'
 $Images = @('ledgerline-accounts:local', 'ledgerline-payments:local', 'ledgerline-risk:local',
     'ledgerline-notifications:local', 'ledgerline-banksim:local', 'ledgerline-gateway:local')
 $HelmArgs = @($args)
+$Profiles = @('--profile', 'app')
+# Phase 2 (docs/kubernetes.md): with --set phase2.enabled=true among the arguments, the Reporting and Reconciliation
+# images are built and loaded too. Without it nothing changes.
+if (@($HelmArgs | Where-Object { "$_" -like '*phase2.enabled=true*' }).Count -gt 0) {
+    $Profiles = @('--profile', 'app', '--profile', 'phase2')
+    $Images += @('ledgerline-reporting:local', 'ledgerline-reconciliation:local')
+}
 
 foreach ($tool in 'docker', 'kind', 'helm', 'kubectl') {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
@@ -33,7 +40,7 @@ if ($existing -notcontains $Cluster) { throw "kind cluster '$Cluster' does not e
 Push-Location $Root
 try {
     Write-Host '== Building images'
-    & docker compose --profile app build
+    & docker compose @Profiles build
     if ($LASTEXITCODE -ne 0) { throw "docker compose build failed ($LASTEXITCODE)" }
 
     Write-Host "== Loading images into kind cluster '$Cluster'"
