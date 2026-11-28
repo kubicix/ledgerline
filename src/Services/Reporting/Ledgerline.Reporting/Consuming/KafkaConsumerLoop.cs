@@ -20,6 +20,7 @@ namespace Ledgerline.Reporting.Consuming;
 /// waits plus the dead-letter produce: well under librdkafka's 300 s <c>max.poll.interval.ms</c> at the defaults.</item>
 /// <item>A record whose type no projection handles counts as applied.</item>
 /// <item>A failed offset commit replaces the consumer, which resumes from the offsets Kafka really holds.</item>
+/// <item>Every batch taken and every applied prefix is reported to <see cref="LagTracker"/>.</item>
 /// </list>
 /// The blocking consumer runs on its own thread.
 /// </summary>
@@ -30,15 +31,17 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
     private readonly ConsumerOptions options;
     private readonly MongoCollections collections;
     private readonly DeadLetterProducer deadLetters;
+    private readonly LagTracker lag;
     private readonly ILogger<KafkaConsumerLoop> logger;
     private readonly ILookup<string, IProjection> projections;
 
     public KafkaConsumerLoop(ConsumerOptions options, MongoCollections collections, IEnumerable<IProjection> projections,
-        DeadLetterProducer deadLetters, ILogger<KafkaConsumerLoop> logger)
+        DeadLetterProducer deadLetters, LagTracker lag, ILogger<KafkaConsumerLoop> logger)
     {
         this.options = options;
         this.collections = collections;
         this.deadLetters = deadLetters;
+        this.lag = lag;
         this.logger = logger;
         this.projections = projections
             .SelectMany(projection => projection.MessageTypes.Select(type => (Type: type, Projection: projection)))
@@ -120,9 +123,11 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
         {
             var batch = NextBatch(consumer, ct);
             if (batch.Count == 0) continue;
+            lag.Taken(consumer, batch);
             var (done, retry) = Apply(batch, ct);
             Commit(consumer, batch, done);
             if (done < batch.Count) Rewind(consumer, batch, done);
+            lag.Applied(consumer, batch, done);
             if (!retry)
             {
                 failures = 0;
@@ -275,6 +280,7 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
     /// <summary>Leaves the group so its partitions move at once; bounded, because the host's shutdown budget is 25 s.</summary>
     private void Close(IConsumer<byte[], byte[]> consumer)
     {
+        lag.Reset();
         try
         {
             if (!Task.Run(consumer.Close).Wait(CloseTimeout))

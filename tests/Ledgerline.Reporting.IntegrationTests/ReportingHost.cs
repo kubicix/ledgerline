@@ -14,18 +14,23 @@ namespace Ledgerline.Reporting.IntegrationTests;
 /// <summary>
 /// Runs Reporting in-process against the fixture's Kafka and MongoDB. Every host gets its own topics, consumer group
 /// and database, so tests share the broker and the server without seeing each other's records or documents. The
-/// test broker has no kafka-init: the topics are created here before the consumer subscribes.
+/// test broker has no kafka-init: the topics are created here before the consumer subscribes. A test that runs
+/// Accounts as well passes Accounts' fixed topic names instead and filters by its own IDs.
 /// </summary>
 public sealed class ReportingHost : IAsyncDisposable
 {
     public const int EventPartitions = 6;
-    private readonly WebApplicationFactory<Program> factory;
+    private readonly Action<IServiceCollection>? overrides;
     private readonly IProducer<string, byte[]> producer;
     private readonly IAdminClient admin;
+    private WebApplicationFactory<Program>? factory;
 
-    private ReportingHost(WebApplicationFactory<Program> factory, string bootstrapServers, ConsumerOptions options, IMongoDatabase database)
+    private ReportingHost(IReadOnlyDictionary<string, string?> settings, Action<IServiceCollection>? overrides,
+        string bootstrapServers, ConsumerOptions options, IMongoDatabase database)
     {
-        this.factory = factory;
+        Settings = settings;
+        this.overrides = overrides;
+        factory = new ConfiguredFactory(settings, overrides);
         Options = options;
         Database = database;
         BootstrapServers = bootstrapServers;
@@ -33,17 +38,22 @@ public sealed class ReportingHost : IAsyncDisposable
         admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = bootstrapServers }).Build();
     }
 
-    public IServiceProvider Services => factory.Services;
+    public IServiceProvider Services => Factory.Services;
     public ConsumerOptions Options { get; }
     public IMongoDatabase Database { get; }
     public string BootstrapServers { get; }
+
+    /// <summary>Reporting's configuration, so a one-shot command runs against the same topics, group and database.</summary>
+    public IReadOnlyDictionary<string, string?> Settings { get; }
 
     /// <param name="beforeStart">
     /// Runs after the topics exist and before Reporting starts, for example to produce records the first batch must
     /// contain. It must not touch <see cref="Services"/>, which would start the host.
     /// </param>
+    /// <param name="ledgerEntriesTopic">A fixed ledger topic (Accounts' own name) instead of a fresh one.</param>
+    /// <param name="accountEventsTopic">A fixed account events topic (Accounts' own name) instead of a fresh one.</param>
     public static async Task<ReportingHost> StartAsync(InfrastructureFixture infrastructure, Action<IServiceCollection>? overrides = null,
-        Func<ReportingHost, Task>? beforeStart = null)
+        Func<ReportingHost, Task>? beforeStart = null, string? ledgerEntriesTopic = null, string? accountEventsTopic = null)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
         var suffix = Guid.NewGuid().ToString("N");
@@ -53,16 +63,16 @@ public sealed class ReportingHost : IAsyncDisposable
         {
             BootstrapServers = bootstrapServers,
             GroupId = "reporting-test-" + suffix,
-            LedgerEntriesTopic = $"test.{suffix}.ledger.entries",
+            LedgerEntriesTopic = ledgerEntriesTopic ?? $"test.{suffix}.ledger.entries",
             PaymentEventsTopic = $"test.{suffix}.payments.events",
-            AccountEventsTopic = $"test.{suffix}.accounts.events",
+            AccountEventsTopic = accountEventsTopic ?? $"test.{suffix}.accounts.events",
             DeadLetterTopic = $"test.{suffix}.reporting.dead",
             RetryInitialDelay = TimeSpan.FromMilliseconds(20),
             RetryMaxDelay = TimeSpan.FromMilliseconds(200)
         };
         var databaseName = "reporting_" + suffix;
         await CreateTopicsAsync(bootstrapServers, options);
-        var factory = new ConfiguredFactory(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
             [ConsumerOptions.BootstrapServersKey] = bootstrapServers,
             [ConsumerOptions.GroupIdKey] = options.GroupId,
@@ -74,12 +84,12 @@ public sealed class ReportingHost : IAsyncDisposable
             [ConsumerOptions.RetryMaxDelayMsKey] = "200",
             ["ConnectionStrings:Mongo"] = mongo,
             ["Reporting:Mongo:Database"] = databaseName
-        }, overrides);
-        var host = new ReportingHost(factory, bootstrapServers, options, new MongoClient(mongo).GetDatabase(databaseName));
+        };
+        var host = new ReportingHost(settings, overrides, bootstrapServers, options, new MongoClient(mongo).GetDatabase(databaseName));
         try
         {
             if (beforeStart is not null) await beforeStart(host);
-            _ = factory.Services;
+            _ = host.Services;
             return host;
         }
         catch
@@ -91,14 +101,17 @@ public sealed class ReportingHost : IAsyncDisposable
 
     public HttpClient CreateClient(Guid? userId = null, string roles = "customer")
     {
-        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var client = Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         if (userId is not null) client.DefaultRequestHeaders.Authorization = new("Bearer", TestTokens.Create(userId.Value, roles, null));
         return client;
     }
 
-    public async Task<DeliveryResult<string, byte[]>> ProduceAsync(string topic, string key, byte[] value)
+    /// <param name="timestamp">The record's create time; the producer's clock when null.</param>
+    public async Task<DeliveryResult<string, byte[]>> ProduceAsync(string topic, string key, byte[] value, DateTimeOffset? timestamp = null)
     {
-        var delivery = await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key, Value = value }, TestContext.Current.CancellationToken);
+        var message = new Message<string, byte[]> { Key = key, Value = value };
+        if (timestamp is not null) message.Timestamp = new Timestamp(timestamp.Value);
+        var delivery = await producer.ProduceAsync(topic, message, TestContext.Current.CancellationToken);
         delivery.Status.ShouldBe(PersistenceStatus.Persisted);
         return delivery;
     }
@@ -111,20 +124,75 @@ public sealed class ReportingHost : IAsyncDisposable
         return offset == Offset.Unset ? null : offset.Value;
     }
 
+    /// <summary>
+    /// Waits until the group has committed every record of every partition of the three event topics, up to their end
+    /// offsets as they stand when this is called. It reads only Kafka, never the read model.
+    /// </summary>
+    public async Task WaitForCatchUpAsync(TimeSpan timeout)
+    {
+        var ends = new List<(TopicPartition Partition, long End)>();
+        using (var reader = new ConsumerBuilder<byte[], byte[]>(new ConsumerConfig
+               {
+                   BootstrapServers = BootstrapServers,
+                   GroupId = "watermarks-" + Guid.NewGuid().ToString("N"),
+                   EnableAutoCommit = false
+               }).Build())
+        {
+            foreach (var topic in Options.EventTopics)
+            {
+                var partitions = admin.GetMetadata(topic, TimeSpan.FromSeconds(10)).Topics.Single().Partitions;
+                foreach (var metadata in partitions)
+                {
+                    var partition = new TopicPartition(topic, metadata.PartitionId);
+                    ends.Add((partition, reader.QueryWatermarkOffsets(partition, TimeSpan.FromSeconds(10)).High.Value));
+                }
+            }
+        }
+        await Eventually.ShouldAsync(async () =>
+        {
+            foreach (var (partition, end) in ends)
+                if ((await CommittedOffsetAsync(partition) ?? 0) < end) return false;
+            return true;
+        }, timeout, "The Reporting consumer did not commit up to the end of the event topics.");
+    }
+
+    /// <summary>Stops Reporting, whose consumer leaves the group. The topics, the group's offsets and the database stay.</summary>
+    public async Task StopAsync()
+    {
+        if (factory is null) return;
+        await factory.DisposeAsync();
+        factory = null;
+    }
+
+    /// <summary>Starts Reporting again on the same topics, group and database.</summary>
+    public void StartAgain()
+    {
+        if (factory is not null) throw new InvalidOperationException("Reporting is already running.");
+        factory = new ConfiguredFactory(Settings, overrides);
+        _ = factory.Services;
+    }
+
     public async ValueTask DisposeAsync()
     {
-        await factory.DisposeAsync();
+        await StopAsync();
         producer.Dispose();
         admin.Dispose();
         await Database.Client.DropDatabaseAsync(Database.DatabaseNamespace.DatabaseName);
     }
+
+    private WebApplicationFactory<Program> Factory => factory ?? throw new InvalidOperationException("Reporting is stopped.");
 
     private static async Task CreateTopicsAsync(string bootstrapServers, ConsumerOptions options)
     {
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = bootstrapServers }).Build();
         var topics = options.EventTopics.Select(name => new TopicSpecification { Name = name, NumPartitions = EventPartitions, ReplicationFactor = 1 })
             .Append(new TopicSpecification { Name = options.DeadLetterTopic, NumPartitions = 1, ReplicationFactor = 1 });
-        await admin.CreateTopicsAsync(topics);
+        try
+        {
+            await admin.CreateTopicsAsync(topics);
+        }
+        // Accounts' fixed topics exist already when another test of the module created them.
+        catch (CreateTopicsException error) when (error.Results.All(x => x.Error.Code is ErrorCode.NoError or ErrorCode.TopicAlreadyExists)) { }
     }
 
     private sealed class ConfiguredFactory(IReadOnlyDictionary<string, string?> settings, Action<IServiceCollection>? overrides)

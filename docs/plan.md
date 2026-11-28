@@ -883,7 +883,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T06: Reporting API, rebuild and consistency proofs
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 5, 6 (Q2, Q3), 7 (lag header). **Depends:** M5-T05.
 **Files:** `Projections/AccountOwnersProjection.cs`, `Features/{StatementEndpoint.cs,TimelineEndpoint.cs,DailyTotalsEndpoint.cs}`, `Consuming/LagTracker.cs`, `Infrastructure/RebuildCommand.cs` (`rebuild`: drop collections, reset the group's offsets to the beginning). Test `ReportingApiTests.cs`, `RebuildTests.cs`.
