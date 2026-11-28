@@ -52,9 +52,14 @@ public sealed class ReportingHost : IAsyncDisposable
     /// </param>
     /// <param name="ledgerEntriesTopic">A fixed ledger topic (Accounts' own name) instead of a fresh one.</param>
     /// <param name="accountEventsTopic">A fixed account events topic (Accounts' own name) instead of a fresh one.</param>
+    /// <param name="retryInitialDelay">The first retry wait; 20 ms when null.</param>
+    /// <param name="retryMaxDelay">The longest retry wait; 200 ms when null.</param>
     public static async Task<ReportingHost> StartAsync(InfrastructureFixture infrastructure, Action<IServiceCollection>? overrides = null,
-        Func<ReportingHost, Task>? beforeStart = null, string? ledgerEntriesTopic = null, string? accountEventsTopic = null)
+        Func<ReportingHost, Task>? beforeStart = null, string? ledgerEntriesTopic = null, string? accountEventsTopic = null,
+        TimeSpan? retryInitialDelay = null, TimeSpan? retryMaxDelay = null)
     {
+        var initialDelay = retryInitialDelay ?? TimeSpan.FromMilliseconds(20);
+        var maxDelay = retryMaxDelay ?? TimeSpan.FromMilliseconds(200);
         ArgumentNullException.ThrowIfNull(infrastructure);
         var suffix = Guid.NewGuid().ToString("N");
         var bootstrapServers = infrastructure.KafkaBootstrapServers;
@@ -67,8 +72,8 @@ public sealed class ReportingHost : IAsyncDisposable
             PaymentEventsTopic = $"test.{suffix}.payments.events",
             AccountEventsTopic = accountEventsTopic ?? $"test.{suffix}.accounts.events",
             DeadLetterTopic = $"test.{suffix}.reporting.dead",
-            RetryInitialDelay = TimeSpan.FromMilliseconds(20),
-            RetryMaxDelay = TimeSpan.FromMilliseconds(200)
+            RetryInitialDelay = initialDelay,
+            RetryMaxDelay = maxDelay
         };
         var databaseName = "reporting_" + suffix;
         await CreateTopicsAsync(bootstrapServers, options);
@@ -80,8 +85,8 @@ public sealed class ReportingHost : IAsyncDisposable
             [ConsumerOptions.PaymentEventsTopicKey] = options.PaymentEventsTopic,
             [ConsumerOptions.AccountEventsTopicKey] = options.AccountEventsTopic,
             [ConsumerOptions.DeadLetterTopicKey] = options.DeadLetterTopic,
-            [ConsumerOptions.RetryInitialDelayMsKey] = "20",
-            [ConsumerOptions.RetryMaxDelayMsKey] = "200",
+            [ConsumerOptions.RetryInitialDelayMsKey] = ((long)initialDelay.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [ConsumerOptions.RetryMaxDelayMsKey] = ((long)maxDelay.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["ConnectionStrings:Mongo"] = mongo,
             ["Reporting:Mongo:Database"] = databaseName
         };

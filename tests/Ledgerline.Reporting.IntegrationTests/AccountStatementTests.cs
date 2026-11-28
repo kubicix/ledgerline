@@ -92,12 +92,13 @@ public sealed class AccountStatementTests(InfrastructureFixture infrastructure)
         var poison = new List<DeliveryResult<string, byte[]>>();
         DeliveryResult<string, byte[]>? goodRecord = null;
         var good = Line();
-        // Produced before Reporting starts, so the first batch holds all four records.
+        // Produced before Reporting starts, so the first batch holds all four records. Slow retries (each later poison
+        // record needs at least 4 s of waits) keep the intermediate assertion far from a race on a loaded runner.
         await using var host = await ReportingHost.StartAsync(infrastructure, beforeStart: async starting =>
         {
             for (var i = 0; i < 3; i++) poison.Add(await starting.ProduceAsync(starting.Options.LedgerEntriesTopic, key, PoisonRecord()));
             goodRecord = await starting.ProduceAsync(starting.Options.LedgerEntriesTopic, key, Record(good));
-        });
+        }, retryInitialDelay: TimeSpan.FromSeconds(1), retryMaxDelay: TimeSpan.FromSeconds(2));
         var dead = new TopicPartition(host.Options.DeadLetterTopic, 0);
         using var reader = DeadReader(host);
 
