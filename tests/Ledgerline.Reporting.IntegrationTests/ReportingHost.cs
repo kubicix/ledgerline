@@ -121,12 +121,25 @@ public sealed class ReportingHost : IAsyncDisposable
         return delivery;
     }
 
-    /// <summary>The group's committed offset for one partition, or null when the group never committed there.</summary>
+    /// <summary>
+    /// The group's committed offset for one partition, or null when the group never committed there. A broker that does
+    /// not answer within the request timeout also gives null ("not committed yet"), so a caller polling with
+    /// <c>Eventually</c> asks again and only its overall timeout can fail the test.
+    /// </summary>
     public async Task<long?> CommittedOffsetAsync(TopicPartition partition)
     {
-        var results = await admin.ListConsumerGroupOffsetsAsync([new ConsumerGroupTopicPartitions(Options.GroupId, [partition])]);
-        var offset = results.Single().Partitions.Single().Offset;
-        return offset == Offset.Unset ? null : offset.Value;
+        try
+        {
+            var results = await admin.ListConsumerGroupOffsetsAsync(
+                [new ConsumerGroupTopicPartitions(Options.GroupId, [partition])],
+                new ListConsumerGroupOffsetsOptions { RequestTimeout = TimeSpan.FromSeconds(5) });
+            var offset = results.Single().Partitions.Single().Offset;
+            return offset == Offset.Unset ? null : offset.Value;
+        }
+        catch (KafkaException e) when (e.Error.Code is ErrorCode.Local_TimedOut or ErrorCode.RequestTimedOut)
+        {
+            return null;
+        }
     }
 
     /// <summary>
