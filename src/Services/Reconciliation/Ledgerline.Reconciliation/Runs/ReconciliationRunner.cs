@@ -195,8 +195,10 @@ public sealed partial class ReconciliationRunner(
         await db.Database.ExecuteSqlAsync($"DELETE FROM reconciliation_items WHERE run_id = {claim.RunId}", ct);
         db.Items.AddRange(result.Mismatches.Select((mismatch, index) => Item(claim.RunId, mismatch, index)));
         Enqueue(claim, result, inputsIncomplete, completedAt);
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        // Not cancellable: a commit the server applies while the client reports cancellation would send a Completed run
+        // to recovery, which for incomplete inputs re-runs it and publishes a second event set.
+        await db.SaveChangesAsync(CancellationToken.None);
+        await transaction.CommitAsync(CancellationToken.None);
         RunCompleted(logger, claim.BusinessDate, result.MatchedPaymentIds.Count, result.Mismatches.Count, inputsIncomplete);
         return RunOutcome.Completed;
     }

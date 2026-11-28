@@ -399,28 +399,66 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
     [Fact]
     public async Task Concurrent_reruns_of_an_incomplete_run_publish_one_event_set()
     {
+        // The interleaving the reclaim guard exists for: runner B reads the run while A holds it Running, B's takeover
+        // then waits on the row lock of A's completing transaction, and A completes with incomplete inputs (Kafka is
+        // unreachable, the input wait is 2 s). The completion keeps started_at, so a guard on started_at alone lets B
+        // take over the fresh completion and publish a second event set. (B must read before A's completing update: a
+        // runner that arrives during that transaction waits in its insert and then rightly re-runs what it first finds,
+        // a Completed run with incomplete inputs.)
         var date = new DateOnly(2026, 11, 11);
-        var gate = new BothPassLock(2);
-        await using var scenario = await StartAsync(date, overrides: services => services.AddSingleton<IRunLock>(gate));
-        // A run that completed while Kafka lagged; its events went out with it (not in this database's outbox here).
-        var incomplete = Guid.NewGuid();
-        await ExecuteAsync(scenario.Host, $"""
-            INSERT INTO reconciliation_runs (id, business_date, status, matched, mismatched, inputs_incomplete, started_at, completed_at)
-            VALUES ('{incomplete}', '2026-11-11', 'Completed', 0, 1, true, now() - interval '1 hour', now() - interval '50 minutes');
-            INSERT INTO reconciliation_items (id, run_id, code, reference, bank_amount_minor, ledger_amount_minor, currency)
-            VALUES ('{Guid.NewGuid()}', '{incomplete}', 'UnknownBankRecord', 'stale', 1, NULL, 'TRY');
-            """);
+        var at = new DateTimeOffset(2026, 11, 11, 10, 0, 0, TimeSpan.Zero);
+        Guid[] ids = [Guid.NewGuid(), Guid.NewGuid()];
+        var csv = "record_type,bank_id,reference,amount_minor,currency,occurred_at\n" +
+            string.Concat(ids.Select((id, index) => $"CAPTURE,cap_{index},{id},1000,TRY,2026-11-11T10:00:00Z\n")) +
+            "CAPTURE,cap_unknown,not-a-payment,500,TRY,2026-11-11T10:00:00Z\n";
+        // Gates: A's guarded Completed update, B's takeover update, and A's save inside the completing transaction.
+        var completing = new CommandGate("SET status = 'Completed'");
+        var takeover = new CommandGate("GREATEST(");
+        var saving = new PauseFirstCompletion();
+        await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: RunSettings(new()
+        {
+            [StagingOptions.BootstrapServersKey] = "127.0.0.1:9",
+            ["Reconciliation:Run:InputWaitTimeout"] = "00:00:02"
+        }), overrides: services =>
+        {
+            // The Redis lock would keep B out at step 1; C1 and this race are the database's to decide.
+            services.AddSingleton<IRunLock>(new BothPassLock(1));
+            services.AddSingleton(new BankSettlementClient(new HttpClient(new CannedSettlement(csv, date)) { BaseAddress = new Uri("http://bank.test/") }));
+            services.AddDbContext<Infrastructure.ReconciliationDbContext>((_, options) => options.AddInterceptors(completing, takeover, saving));
+        });
+        await StageTopUpsAsync(host, ids, at);
 
-        var outcomes = await Task.WhenAll(Task.Run(scenario.RunAsync, Ct), Task.Run(scenario.RunAsync, Ct));
+        // A claims the date and runs up to its completion; the row is committed Running.
+        var first = Task.Run(() => RunOnceAsync(host, date), Ct);
+        await completing.Reached.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        // B finds the date taken, reads the run as Running and is about to take it over.
+        var second = Task.Run(() => RunOnceAsync(host, date), Ct);
+        await takeover.Reached.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        // A sets the run Completed (incomplete inputs) in its open transaction and holds the row lock.
+        completing.Release();
+        await saving.Paused.WaitAsync(TimeSpan.FromSeconds(60), Ct);
+        // B's takeover now waits on that lock, then A commits.
+        takeover.Release();
+        await Eventually.ShouldAsync(async () => (await RowsAsync(host,
+                "SELECT count(*)::text FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")).SequenceEqual(["1"]),
+            TimeSpan.FromSeconds(30), "Runner B did not wait on the row lock of A's completion.");
+        saving.Release();
 
-        outcomes.Count(x => x == RunOutcome.Completed).ShouldBe(1);
-        outcomes.Single(x => x != RunOutcome.Completed).ShouldBeOneOf(RunOutcome.AlreadyCompleted, RunOutcome.Superseded);
-        var run = await RunRowAsync(scenario.Host, date);
-        (run.Id, run.Status, run.InputsIncomplete, run.Matched, run.Mismatched).ShouldBe((incomplete, "Completed", false, 3, 0));
-        (await ItemsAsync(scenario.Host)).ShouldBeEmpty();
-        var outbox = await OutboxAsync(scenario.Host);
-        outbox.Select(x => x.Type).ShouldBe([CompletedType, ReconciledType], ignoreOrder: true);
-        outbox.ShouldAllBe(x => x.CorrelationId == incomplete);
+        (await first).ShouldBe(RunOutcome.Completed);
+        (await second).ShouldBe(RunOutcome.AlreadyCompleted);
+        var run = await RunRowAsync(host, date);
+        (run.Status, run.InputsIncomplete, run.Matched, run.Mismatched).ShouldBe(("Completed", true, 2, 1));
+        // One completion, one set of events.
+        var outbox = await OutboxAsync(host);
+        outbox.Select(x => x.Type).ShouldBe([CompletedType, ReconciledType, MismatchType], ignoreOrder: true);
+        outbox.ShouldAllBe(x => x.CorrelationId == run.Id);
+        outbox.Single(x => x.Type == CompletedType).Payload<ReconciliationCompleted>().InputsIncomplete.ShouldBeTrue();
+    }
+
+    private static async Task<RunOutcome> RunOnceAsync(StagingHost host, DateOnly date)
+    {
+        await using var scope = host.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ReconciliationRunner>().RunAsync(date, Ct);
     }
 
     [Fact]
@@ -452,7 +490,7 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         var csv = new StringBuilder("record_type,bank_id,reference,amount_minor,currency,occurred_at\n");
         foreach (var (id, index) in ids.Select((id, index) => (id, index))) csv.Append(CultureInfo.InvariantCulture, $"CAPTURE,cap_{index},{id},1000,TRY,2026-11-08T10:00:00Z\n");
         await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: RunSettings(), overrides: services =>
-            services.AddSingleton(new BankSettlementClient(new HttpClient(new CannedSettlement(csv.ToString())) { BaseAddress = new Uri("http://bank.test/") })));
+            services.AddSingleton(new BankSettlementClient(new HttpClient(new CannedSettlement(csv.ToString(), date)) { BaseAddress = new Uri("http://bank.test/") })));
         await StageTopUpsAsync(host, ids, at);
 
         await using (var scope = host.Services.CreateAsyncScope())
@@ -821,11 +859,73 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         }
     }
 
-    private sealed class CannedSettlement(string csv) : HttpMessageHandler
+    private sealed class CannedSettlement(string csv, DateOnly date) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(request.RequestUri!.AbsolutePath == "/settlements/2026-11-08"
+            Task.FromResult(request.RequestUri!.AbsolutePath == "/settlements/" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(csv, Encoding.UTF8, "text/csv") }
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
+    /// <summary>Holds the first command whose text contains the marker, before it is sent, until <see cref="Release"/>.</summary>
+    private sealed class CommandGate(string marker) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private readonly TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int seen;
+
+        public Task Reached => reached.Task;
+        public void Release() => released.TrySetResult();
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            await HoldAsync(command);
+            return result;
+        }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            await HoldAsync(command);
+            return result;
+        }
+
+        private async Task HoldAsync(System.Data.Common.DbCommand command)
+        {
+            if (!command.CommandText.Contains(marker, StringComparison.Ordinal) || Interlocked.Increment(ref seen) != 1) return;
+            reached.TrySetResult();
+            await released.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        }
+    }
+
+    /// <summary>
+    /// Holds the first completing transaction (the first save that adds outbox rows) after its guarded update, so the run
+    /// row stays locked until <see cref="Release"/>.
+    /// </summary>
+    private sealed class PauseFirstCompletion : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private readonly TaskCompletionSource paused = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int seen;
+
+        public Task Paused => paused.Task;
+        public void Release() => released.TrySetResult();
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var completing = eventData.Context?.ChangeTracker.Entries<Ledgerline.BuildingBlocks.Messaging.Outbox.OutboxMessage>()
+                .Any(entry => entry.State == EntityState.Added) == true;
+            if (completing && Interlocked.Increment(ref seen) == 1)
+            {
+                paused.TrySetResult();
+                await released.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            }
+            return result;
+        }
     }
 }
