@@ -914,7 +914,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T09: Reconciliation: job, lock, run lifecycle, events
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` sections 3, 4, 7, 8; ADR 0010. **Depends:** M5-T08, M2-T07.
 **Files:** `Runs/{DailyReconciliationJob.cs,ReconciliationRunner.cs,BankSettlementClient.cs,RunLock.cs}`, contracts `Reconciliation/{ReconciliationCompleted.cs,PaymentsReconciled.cs,ReconciliationMismatchDetected.cs}` with samples, `Program.cs` (Quartz clustered ADO.NET store, messaging with outbox only). Add `Quartz`, `Quartz.Extensions.Hosting` 4.7.3. Test `RunTests.cs` (Bank Simulator in-process; Kafka records produced by the test).

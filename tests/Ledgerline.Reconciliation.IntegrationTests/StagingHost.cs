@@ -36,8 +36,14 @@ public sealed class StagingHost : IAsyncDisposable
     public IReadOnlyList<TopicPartition> AllPartitions => Options.Topics
         .SelectMany(topic => Enumerable.Range(0, Partitions).Select(partition => new TopicPartition(topic, partition))).ToList();
 
+    public IServiceProvider Services => host.Services;
+
+    /// <param name="infrastructure">The fixture's containers.</param>
     /// <param name="migrated">False starts the service on an empty database, as before <c>migrate</c> ran.</param>
-    public static async Task<StagingHost> StartAsync(InfrastructureFixture infrastructure, bool migrated = true)
+    /// <param name="extraSettings">Host settings on top of the staging ones. The Quartz scheduler is off unless they turn it on.</param>
+    /// <param name="overrides">Service registrations that replace the service's own.</param>
+    public static async Task<StagingHost> StartAsync(InfrastructureFixture infrastructure, bool migrated = true,
+        IReadOnlyDictionary<string, string?>? extraSettings = null, Action<IServiceCollection>? overrides = null)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
         var suffix = Guid.NewGuid().ToString("N");
@@ -56,17 +62,23 @@ public sealed class StagingHost : IAsyncDisposable
             [StagingOptions.PaymentEventsTopicKey] = options.PaymentEventsTopic,
             [StagingOptions.LedgerEntriesTopicKey] = options.LedgerEntriesTopic,
             [StagingOptions.RetryInitialDelayMsKey] = 20.ToString(CultureInfo.InvariantCulture),
-            [StagingOptions.RetryMaxDelayMsKey] = 200.ToString(CultureInfo.InvariantCulture)
+            [StagingOptions.RetryMaxDelayMsKey] = 200.ToString(CultureInfo.InvariantCulture),
+            // Staging hosts need no scheduler, and on an empty database its schema check would fail the start.
+            ["Reconciliation:Scheduler:Enabled"] = "false"
         };
+        foreach (var (key, value) in extraSettings ?? new Dictionary<string, string?>()) settings[key] = value;
         var host = migrated
-            ? await ServiceHost<Program>.StartAsync(infrastructure, "recon_staging", settings: settings)
-            : await ServiceHost<Program>.StartOnDatabaseAsync(infrastructure, await infrastructure.CreateDatabaseAsync("recon_empty"), settings: settings);
+            ? await ServiceHost<Program>.StartAsync(infrastructure, "recon_staging", overrides, settings)
+            : await ServiceHost<Program>.StartOnDatabaseAsync(infrastructure, await infrastructure.CreateDatabaseAsync("recon_empty"), overrides, settings);
         return new StagingHost(host, options);
     }
 
-    public async Task<DeliveryResult<string, byte[]>> ProduceAsync(string topic, Guid key, byte[] value)
+    /// <param name="timestamp">The record's Kafka timestamp; the produce time when null.</param>
+    public async Task<DeliveryResult<string, byte[]>> ProduceAsync(string topic, Guid key, byte[] value, DateTimeOffset? timestamp = null)
     {
-        var delivery = await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key.ToString(), Value = value },
+        var message = new Message<string, byte[]> { Key = key.ToString(), Value = value };
+        if (timestamp is { } at) message.Timestamp = new Timestamp(at);
+        var delivery = await producer.ProduceAsync(topic, message,
             TestContext.Current.CancellationToken);
         delivery.Status.ShouldBe(PersistenceStatus.Persisted);
         return delivery;
