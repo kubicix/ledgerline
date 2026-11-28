@@ -46,6 +46,7 @@
     <Project Path="tests/Ledgerline.Notifications.IntegrationTests/Ledgerline.Notifications.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Payments.IntegrationTests/Ledgerline.Payments.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Payments.Tests/Ledgerline.Payments.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Reconciliation.IntegrationTests/Ledgerline.Reconciliation.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Reconciliation.Tests/Ledgerline.Reconciliation.Tests.csproj" />
     <Project Path="tests/Ledgerline.Reporting.IntegrationTests/Ledgerline.Reporting.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Risk.Tests/Ledgerline.Risk.Tests.csproj" />

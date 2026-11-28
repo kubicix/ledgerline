@@ -904,7 +904,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T08: Reconciliation: staging consumers and schema
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` sections 2, 6. **Depends:** M5-T03, M5-T07.
 **Files:** In Reconciliation: `Infrastructure/{ReconciliationDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}` (Quartz tables through the SQL script shipped with `Quartz.Serialization.SystemTextJson` and the PostgreSQL job store package; verify package names on nuget.org), `Staging/{PaymentStagingConsumer.cs,LedgerStagingConsumer.cs}` (reuse the consumer loop pattern from Reporting by copying the small class; do not create a shared Kafka consumer library for two users); `deploy/compose/postgres/init-databases.sql` gains `reconciliation` login and database. `tests/Ledgerline.Reconciliation.IntegrationTests/StagingTests.cs`.

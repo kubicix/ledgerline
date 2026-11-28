@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Reconciliation/Ledgerline.Reconciliation/Ledgerline.Reconciliation.csproj" />
+    <!-- Only to pin the copied BANK_CLEARING id rule against the Accounts reference implementation. -->
+    <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+    <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
+  </ItemGroup>
+</Project>
