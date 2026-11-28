@@ -141,15 +141,16 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
     {
         var cs = await CreateDatabaseAsync();
         using var signal = new OutboxSignal();
+        using var wakeUp = signal.Subscribe();
         var interceptor = new OutboxSaveChangesInterceptor(signal);
         await using var db = new TestDbContext(new DbContextOptionsBuilder<TestDbContext>()
             .UseNpgsql(cs).AddInterceptors(interceptor).Options);
         await using var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
         new EfOutbox<TestDbContext>(db, new MessageTypeRegistry(), new SystemClock()).Enqueue(new RecordedMessage(1), Ids.New());
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        (await signal.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await wakeUp.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeFalse();
         await transaction.CommitAsync(TestContext.Current.CancellationToken);
-        (await signal.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeTrue();
+        (await wakeUp.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeTrue();
     }
 
     [Fact]
@@ -157,6 +158,7 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
     {
         var cs = await CreateDatabaseAsync();
         using var signal = new OutboxSignal();
+        using var wakeUp = signal.Subscribe();
         var interceptor = new OutboxSaveChangesInterceptor(signal);
         await using var db = new TestDbContext(new DbContextOptionsBuilder<TestDbContext>()
             .UseNpgsql(cs).AddInterceptors(interceptor).Options);
@@ -164,7 +166,7 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
         new EfOutbox<TestDbContext>(db, new MessageTypeRegistry(), new SystemClock()).Enqueue(new RecordedMessage(1), Ids.New());
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         await transaction.RollbackAsync(TestContext.Current.CancellationToken);
-        (await signal.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await wakeUp.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)).ShouldBeFalse();
     }
 
     private IHost CreateHost(string cs, IOutboxPublisher? publisher = null, int pollMs = 10, IInterceptor? observer = null,

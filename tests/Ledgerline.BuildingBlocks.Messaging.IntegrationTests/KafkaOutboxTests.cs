@@ -148,7 +148,8 @@ public sealed class KafkaOutboxTests(InfrastructureFixture infrastructure)
         var cs = await CreateDatabaseAsync();
         var uri = await VirtualHostAsync(cs);
         await using var probe = await BrokerProbe.CreateAsync(uri, "kafkatest.event.#");
-        var host = await StartHostAsync(cs, uri, topic);
+        // A 60 s produce bound: a relay that ignored cancellation would hold the stop until the 30 s host shutdown timeout.
+        var host = await StartHostAsync(cs, uri, topic, messageTimeoutMs: 60_000);
         await infrastructure.StopKafkaAsync();
         try
         {
@@ -157,7 +158,10 @@ public sealed class KafkaOutboxTests(InfrastructureFixture infrastructure)
             // The Kafka loop is now inside a produce that cannot succeed; stopping must not wait for it.
             var watch = Stopwatch.StartNew();
             await host.StopAsync(TestContext.Current.CancellationToken);
+            // A cancelled produce lets the stop finish well under a second; 5 s leaves room for a slow host.
+            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
             host.Dispose();
+            // Disposal adds at most the publisher's 2 s bounded flush.
             watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
             (await RowAsync(cs, "kafka")).ProcessedAt.ShouldBeNull();
         }
@@ -201,14 +205,16 @@ public sealed class KafkaOutboxTests(InfrastructureFixture infrastructure)
     private static Guid[] Route(IOutboxRouting routing, BatchPosted message, Guid sourceId) =>
         routing.Route(typeof(BatchPosted), message, sourceId).Where(r => r.Transport == "kafka").Select(r => r.MessageId).ToArray();
 
-    private IHost BuildHost(string cs, string rabbitUri, string topic, int pollMs = 20, IInterceptor? observer = null)
+    private IHost BuildHost(string cs, string rabbitUri, string topic, int pollMs = 20, IInterceptor? observer = null,
+        int messageTimeoutMs = 5000)
     {
         var builder = Host.CreateApplicationBuilder();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Messaging:RabbitMq:Uri"] = rabbitUri,
             ["Messaging:Relay:PollIntervalMs"] = pollMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Messaging:Kafka:BootstrapServers"] = topic == "kafka-unused" ? "localhost:1" : infrastructure.KafkaBootstrapServers
+            ["Messaging:Kafka:BootstrapServers"] = topic == "kafka-unused" ? "localhost:1" : infrastructure.KafkaBootstrapServers,
+            ["Messaging:Kafka:MessageTimeoutMs"] = messageTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture)
         }).Build();
         builder.Services.AddDbContext<TestDbContext>(options =>
         {
@@ -223,9 +229,10 @@ public sealed class KafkaOutboxTests(InfrastructureFixture infrastructure)
         return builder.Build();
     }
 
-    private async Task<IHost> StartHostAsync(string cs, string rabbitUri, string topic, int pollMs = 20, IInterceptor? observer = null)
+    private async Task<IHost> StartHostAsync(string cs, string rabbitUri, string topic, int pollMs = 20,
+        IInterceptor? observer = null, int messageTimeoutMs = 5000)
     {
-        var host = BuildHost(cs, rabbitUri, topic, pollMs, observer);
+        var host = BuildHost(cs, rabbitUri, topic, pollMs, observer, messageTimeoutMs);
         await host.StartAsync(TestContext.Current.CancellationToken);
         return host;
     }

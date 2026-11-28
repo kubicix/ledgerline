@@ -1,22 +1,18 @@
 namespace Ledgerline.BuildingBlocks.Messaging.Outbox;
 
 /// <summary>
-/// Wakes the relay after a commit that added outbox rows. Every waiter has its own single permit, so one
-/// <see cref="Notify"/> reaches every relay loop, and a notify that arrives while a loop is busy is kept until it waits.
+/// Wakes the relay after a commit that added outbox rows. Every waiter subscribes and has its own single permit, so
+/// one <see cref="Notify"/> reaches every relay loop, and a notify that arrives while a loop is busy is kept until it waits.
 /// </summary>
 public sealed class OutboxSignal : IDisposable
 {
-    private readonly SemaphoreSlim signal = new(0, 1);
     private readonly Lock gate = new();
     private Subscription[] subscriptions = [];
 
     public void Notify()
     {
-        Release(signal);
         foreach (var subscription in Volatile.Read(ref subscriptions)) Release(subscription.Permit);
     }
-
-    public Task<bool> WaitAsync(TimeSpan timeout, CancellationToken ct) => signal.WaitAsync(timeout, ct);
 
     /// <summary>Registers one more waiter. Subscribe before the first scan, so no notify after that scan is missed.</summary>
     public Subscription Subscribe()
@@ -26,7 +22,10 @@ public sealed class OutboxSignal : IDisposable
         return subscription;
     }
 
-    public void Dispose() => signal.Dispose();
+    public void Dispose()
+    {
+        foreach (var subscription in Volatile.Read(ref subscriptions)) subscription.Dispose();
+    }
 
     private void Unsubscribe(Subscription subscription)
     {
@@ -35,6 +34,8 @@ public sealed class OutboxSignal : IDisposable
 
     private static void Release(SemaphoreSlim permit)
     {
+        // A held permit already means a pending wake-up; only a concurrent release can still find it full below.
+        if (permit.CurrentCount > 0) return;
         try { permit.Release(); }
         catch (SemaphoreFullException) { }
         catch (ObjectDisposedException) { }
