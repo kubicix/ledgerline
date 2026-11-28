@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Services/Reporting/Ledgerline.Reporting/Ledgerline.Reporting.csproj" />
+    <!-- The consistency proof (reporting.md section 6, Q3) runs Accounts in-process as the ledger to compare with. -->
+    <ProjectReference Include="../../src/Services/Accounts/Ledgerline.Accounts/Ledgerline.Accounts.csproj" />
+    <ProjectReference Include="../Ledgerline.Testing/Ledgerline.Testing.csproj" />
+  </ItemGroup>
+</Project>

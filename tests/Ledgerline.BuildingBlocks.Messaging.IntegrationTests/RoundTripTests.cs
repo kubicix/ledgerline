@@ -30,8 +30,9 @@ public sealed class RoundTripTests(InfrastructureFixture infrastructure)
             return await db.Widgets.AnyAsync(w => w.Name == "roundtrip", TestContext.Current.CancellationToken);
         });
         await probe.WaitForAsync<Pong>(p => p.Name == "roundtrip");
-        var sent = probe.Messages.Single(m => m.Type == "roundtrip.command.ping.v1");
-        var reply = probe.Messages.Single(m => m.Type == "roundtrip.event.pong.v1");
+        // The relay is at least once, so the broker may carry a duplicate of the same message id.
+        var sent = probe.Messages.Where(m => m.Type == "roundtrip.command.ping.v1").DistinctBy(m => m.MessageId).Single();
+        var reply = probe.Messages.Where(m => m.Type == "roundtrip.event.pong.v1").DistinctBy(m => m.MessageId).Single();
         reply.CorrelationId.ShouldBe(correlation);
         reply.CausationId.ShouldBe(sent.MessageId);
         await pong.StopAsync(TestContext.Current.CancellationToken);

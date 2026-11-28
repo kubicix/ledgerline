@@ -7,6 +7,10 @@ namespace Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 
 public sealed class RabbitMqOutboxPublisher(RabbitMqConnection connection) : IOutboxPublisher
 {
+    public const string TransportName = "rabbitmq";
+
+    public string Transport => TransportName;
+
     public async Task PublishAsync(OutboxMessage message, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(message);

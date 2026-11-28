@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Ledgerline.BuildingBlocks.Messaging.Outbox;
+using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Microsoft.Extensions.Hosting;
 
 namespace Ledgerline.BuildingBlocks.Messaging.Diagnostics;
@@ -15,15 +16,20 @@ public static class MessagingActivitySource
 
     internal static readonly ActivitySource Source = new(Name);
 
-    /// <summary>Starts the PRODUCER span for one outbox row, as a child of the context captured at enqueue.</summary>
+    /// <summary>
+    /// Starts the PRODUCER span for one outbox row, as a child of the context captured at enqueue. A RabbitMQ row names
+    /// its exchange and routing key; a row of another transport names its type, and its publisher may refine that.
+    /// </summary>
     internal static Activity? StartPublish(OutboxMessage message) =>
-        Start("publish", "send", MessageTypeRegistry.ExchangeFor(message.Type) + ":" + message.Type, ActivityKind.Producer,
-            message.TraceParent, message.MessageId, message.CorrelationId);
+        Start("publish", "send", message.Transport == RabbitMqOutboxPublisher.TransportName
+                ? MessageTypeRegistry.ExchangeFor(message.Type) + ":" + message.Type
+                : message.Type,
+            ActivityKind.Producer, message.TraceParent, message.MessageId, message.CorrelationId, message.Transport);
 
     /// <summary>Starts the CONSUMER span for one delivery, as a child of the context the publisher sent.</summary>
     internal static Activity? StartProcess(MessageEnvelope envelope, string inboxQueue) =>
         Start("process", "process", MessageTypeRegistry.ExchangeFor(envelope.Type) + ":" + envelope.Type + ":" + inboxQueue,
-            ActivityKind.Consumer, envelope.TraceParent, envelope.MessageId, envelope.CorrelationId);
+            ActivityKind.Consumer, envelope.TraceParent, envelope.MessageId, envelope.CorrelationId, RabbitMqOutboxPublisher.TransportName);
 
     /// <summary>The context to send with a message: the current PRODUCER span, or the enqueue context when none is recorded.</summary>
     internal static string? OutgoingTraceParent(string? enqueueTraceParent) =>
@@ -40,15 +46,15 @@ public static class MessagingActivitySource
     }
 
     private static Activity? Start(string operation, string operationType, string destination, ActivityKind kind,
-        string? traceParent, Guid messageId, Guid correlationId)
+        string? traceParent, Guid messageId, Guid correlationId, string system)
     {
         if (!Source.HasListeners()) return null;
         // A null or unparsable traceparent leaves parent default: the span then parents on Activity.Current or starts a new root.
         ActivityContext.TryParse(traceParent, null, isRemote: true, out var parent);
         return Source.StartActivity(operation + " " + destination, kind, parent,
         [
-            new("messaging.system", "rabbitmq"),
-            new("messaging.system.name", "rabbitmq"),
+            new("messaging.system", system),
+            new("messaging.system.name", system),
             new("messaging.destination.name", destination),
             new("messaging.operation.name", operation),
             new("messaging.operation.type", operationType),

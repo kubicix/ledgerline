@@ -1,4 +1,5 @@
 using Ledgerline.BuildingBlocks.Messaging;
+using Ledgerline.BuildingBlocks.Messaging.Kafka;
 using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.BuildingBlocks.Web.Auth;
@@ -60,13 +61,28 @@ builder.Services.AddHttpClient<IBankClient, BankClient>((provider, client) =>
 builder.Services.AddSingleton(services => services.GetRequiredService<IConfiguration>().GetSection("Saga:Timeouts").Get<TimeoutOptions>() ?? new());
 builder.Services.AddHostedService<SagaTimeoutPoller>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<SagaRunner>());
-builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration, messaging => messaging.Service("payments")
-    .Consume<AccountOpened, AccountOpenedHandler>()
-    .Consume<AccountStatusChanged, AccountStatusChangedHandler>()
-    .Consume<RiskApproved, RiskApprovedHandler>().Consume<RiskRejected, RiskRejectedHandler>()
-    .Consume<CallBank, CallBankHandler>()
-    .Consume<LedgerOperationSucceeded, LedgerOperationSucceededHandler>()
-    .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>());
+builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration, messaging =>
+{
+    messaging.Service("payments")
+        .Consume<AccountOpened, AccountOpenedHandler>()
+        .Consume<AccountStatusChanged, AccountStatusChangedHandler>()
+        .Consume<RiskApproved, RiskApprovedHandler>().Consume<RiskRejected, RiskRejectedHandler>()
+        .Consume<CallBank, CallBankHandler>()
+        .Consume<LedgerOperationSucceeded, LedgerOperationSucceededHandler>()
+        .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>();
+    // Off by default. Only the payments.event.* types go to Kafka; commands and their timeouts stay on RabbitMQ alone.
+    if (builder.Configuration.GetValue<bool>("Messaging:Kafka:Enabled"))
+    {
+        const string topic = "ledgerline.payments.events.v1";
+        messaging
+            .AlsoPublishToKafka<PaymentAuthorized>(topic, e => e.PaymentId.ToString())
+            .AlsoPublishToKafka<PaymentCaptured>(topic, e => e.PaymentId.ToString())
+            .AlsoPublishToKafka<PaymentCompleted>(topic, e => e.PaymentId.ToString())
+            .AlsoPublishToKafka<PaymentVoided>(topic, e => e.PaymentId.ToString())
+            .AlsoPublishToKafka<PaymentFailed>(topic, e => e.PaymentId.ToString())
+            .AlsoPublishToKafka<PaymentRefunded>(topic, e => e.PaymentId.ToString());
+    }
+});
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();

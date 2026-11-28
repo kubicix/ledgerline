@@ -831,7 +831,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T01: Kafka and MongoDB in Compose and the test fixture
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 2. **Depends:** M4 complete.
 **Files:** Modify `compose.yaml` (profile `phase2`: `kafka` in KRaft single-node mode with a healthcheck, `mongo`, a one-shot `kafka-init` creating the three topics with 6 partitions and `retention.ms=-1`); `tests/Ledgerline.Testing/InfrastructureFixture.cs` (lazy `KafkaBootstrapServers`, `MongoConnectionString` started on first use). Add `Testcontainers.Kafka`, `Testcontainers.MongoDb`, `Confluent.Kafka`, `MongoDB.Driver`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Phase2FixtureTests.cs`.
@@ -841,7 +841,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T02: Outbox transport column and Kafka publisher
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 2 (last paragraph); `building-blocks.md` section 6 (`transport`). **Depends:** M5-T01.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging.Kafka/` project (so services without Kafka do not load librdkafka): `KafkaOutboxPublisher.cs`, `KafkaTopicMap.cs`, `KafkaMessagingExtensions.cs`. Modify Messaging: `IOutboxPublisher` gains `string Transport { get; }`; `OutboxRelay` runs one loop per registered publisher filtering by `transport`; `IOutbox.Enqueue` consults `IOutboxRouting` to decide which transports a type goes to and writes one row per transport. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/KafkaOutboxTests.cs`.
@@ -852,7 +852,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T03: Accounts and Payments publish to Kafka
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 2 and 5 (accounts topic). **Depends:** M5-T02.
 **Files:** Modify Accounts `Program.cs` (`JournalEntryPosted` expanded per line to `ledgerline.ledger.entries.v1` keyed by `accountId`; `AccountOpened` to `ledgerline.accounts.events.v1`), Payments `Program.cs` (all `payments.event.*` to `ledgerline.payments.events.v1` keyed by `paymentId`); contracts: `JournalEntryLinePosted.cs` (`accounts.event.journal-entry-line-posted.v1`: entry fields plus one line and `lineNo`) with sample. Kafka is optional per configuration (`Messaging:Kafka:Enabled`, default false) so M1 to M4 setups keep working. Test `tests/Ledgerline.Accounts.IntegrationTests/KafkaPublishingTests.cs`, `tests/Ledgerline.Payments.IntegrationTests/KafkaPublishingTests.cs`.
@@ -862,7 +862,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T04: Reporting service: consumer loop and account statements
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 3, 4 (`account_statements`), 6 (Q1), 7. **Depends:** M5-T03.
 **Files:** Create `src/Services/Reporting/Ledgerline.Reporting/` (web project, references `BuildingBlocks`, `BuildingBlocks.Web`, `Contracts`; not `BuildingBlocks.Messaging.Kafka`: it consumes with `Confluent.Kafka` directly): `Program.cs`, `Consuming/{KafkaConsumerLoop.cs,IProjection.cs,DeadLetterProducer.cs}`, `Projections/AccountStatementProjection.cs`, `Infrastructure/MongoCollections.cs`; `tests/Ledgerline.Reporting.IntegrationTests/` with `AccountStatementTests.cs`. Add both to the solution and the service to `ServiceIsolationTests.Deployables`.
@@ -873,7 +873,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T05: Reporting: payment timelines and merchant daily totals
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 4 (two collections). **Depends:** M5-T04.
 **Files:** `Projections/{PaymentTimelineProjection.cs,MerchantDailyTotalsProjection.cs}`. Test `ProjectionTests.cs`.
@@ -883,7 +883,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T06: Reporting API, rebuild and consistency proofs
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 5, 6 (Q2, Q3), 7 (lag header). **Depends:** M5-T05.
 **Files:** `Projections/AccountOwnersProjection.cs`, `Features/{StatementEndpoint.cs,TimelineEndpoint.cs,DailyTotalsEndpoint.cs}`, `Consuming/LagTracker.cs`, `Infrastructure/RebuildCommand.cs` (`rebuild`: drop collections, reset the group's offsets to the beginning). Test `ReportingApiTests.cs`, `RebuildTests.cs`.
@@ -944,8 +944,8 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ## Milestone 5 checklist
 
-- [ ] Kafka event stream fed through the outbox, outage isolated from RabbitMQ (M5-T02, M5-T03).
-- [ ] MongoDB read model with idempotent projections and a proven rebuild (M5-T04 to M5-T06).
+- [x] Kafka event stream fed through the outbox, outage isolated from RabbitMQ (M5-T02, M5-T03).
+- [x] MongoDB read model with idempotent projections and a proven rebuild (M5-T04 to M5-T06).
 - [ ] End-of-day reconciliation with a three-way match and every mismatch code tested (M5-T07 to M5-T10).
 - [ ] One command still starts everything, now with the Phase 2 profile (M5-T11). **DoD: one command**
 - [ ] ADR 0010 matches the code; ADR 0000 Phase 2 rows re-verified. **DoD: ADRs written**

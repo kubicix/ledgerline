@@ -3,21 +3,32 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ledgerline.BuildingBlocks.Messaging.Outbox;
 
-public sealed class EfOutbox<TDbContext>(TDbContext db, MessageTypeRegistry registry, IClock clock) : IOutbox
-    where TDbContext : DbContext
+/// <summary>
+/// Adds the outbox rows of one message to the scoped DbContext: one per record the routing returns, so a message
+/// routed to RabbitMQ and Kafka becomes two rows in the same transaction. Without a routing, RabbitMQ only.
+/// </summary>
+public sealed class EfOutbox<TDbContext>(TDbContext db, MessageTypeRegistry registry, IClock clock,
+    IOutboxRouting? routing = null) : IOutbox where TDbContext : DbContext
 {
+    private readonly IOutboxRouting routing = routing ?? OutboxRouting.RabbitMqOnly;
+
     public void Enqueue<T>(T message, Guid correlationId, Guid? causationId = null)
     {
-        db.Set<OutboxMessage>().Add(new OutboxMessage
+        ArgumentNullException.ThrowIfNull(message);
+        foreach (var record in routing.Route(typeof(T), message, Ids.New()))
         {
-            MessageId = Ids.New(),
-            Type = registry.NameOf<T>(),
-            Payload = EnvelopeSerializer.ToPayload(message),
-            CorrelationId = correlationId,
-            CausationId = causationId,
-            TraceParent = Activity.Current?.Id,
-            OccurredAt = clock.UtcNow,
-            NextAttemptAt = clock.UtcNow
-        });
+            db.Set<OutboxMessage>().Add(new OutboxMessage
+            {
+                MessageId = record.MessageId,
+                Type = registry.NameOf(record.MessageType),
+                Payload = EnvelopeSerializer.ToPayload(record.Message, record.MessageType),
+                CorrelationId = correlationId,
+                CausationId = causationId,
+                TraceParent = Activity.Current?.Id,
+                Transport = record.Transport,
+                OccurredAt = clock.UtcNow,
+                NextAttemptAt = clock.UtcNow
+            });
+        }
     }
 }

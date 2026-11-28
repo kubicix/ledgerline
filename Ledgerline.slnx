@@ -2,6 +2,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/BuildingBlocks/">
     <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging.Kafka/Ledgerline.BuildingBlocks.Messaging.Kafka.csproj" />
     <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
     <Project Path="src/BuildingBlocks/Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
   </Folder>
@@ -24,6 +25,9 @@
   <Folder Name="/src/Services/Payments/">
     <Project Path="src/Services/Payments/Ledgerline.Payments/Ledgerline.Payments.csproj" />
   </Folder>
+  <Folder Name="/src/Services/Reporting/">
+    <Project Path="src/Services/Reporting/Ledgerline.Reporting/Ledgerline.Reporting.csproj" />
+  </Folder>
   <Folder Name="/src/Services/Risk/">
     <Project Path="src/Services/Risk/Ledgerline.Risk/Ledgerline.Risk.csproj" />
   </Folder>
@@ -39,6 +43,7 @@
     <Project Path="tests/Ledgerline.Notifications.IntegrationTests/Ledgerline.Notifications.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Payments.IntegrationTests/Ledgerline.Payments.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Payments.Tests/Ledgerline.Payments.Tests.csproj" />
+    <Project Path="tests/Ledgerline.Reporting.IntegrationTests/Ledgerline.Reporting.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.Risk.Tests/Ledgerline.Risk.Tests.csproj" />
     <Project Path="tests/Ledgerline.Risk.IntegrationTests/Ledgerline.Risk.IntegrationTests.csproj" />
     <Project Path="tests/Ledgerline.SystemTests/Ledgerline.SystemTests.csproj" />

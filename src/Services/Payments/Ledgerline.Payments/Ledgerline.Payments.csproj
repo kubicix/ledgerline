@@ -4,6 +4,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks.Messaging.Kafka/Ledgerline.BuildingBlocks.Messaging.Kafka.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
     <ProjectReference Include="../../../Contracts/Ledgerline.Contracts/Ledgerline.Contracts.csproj" />
   </ItemGroup>

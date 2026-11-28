@@ -1,6 +1,6 @@
 # Ledgerline progress and agent handoff
 
-Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
+Updated: 2026-11-28. Repository: https://github.com/kubicix/ledgerline (public).
 
 ## Checkpoint
 
@@ -10,10 +10,13 @@ Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
   (merge commit 142f201, BASE 1e19932).
 - M4: complete and merged through [PR #30](https://github.com/kubicix/ledgerline/pull/30)
   (merge commit bff7de0, BASE d0bb564).
-- M5 and later milestones: not started.
-- Overall: 65 of 82 planned tasks, approximately 79%. Counting basis: `docs/plan.md`
+- M5 part A (M5-T01 to M5-T06, Kafka event stream and MongoDB read model): complete
+  on branch `milestone-5a` (BASE f8b8faf). M5 part B (M5-T07 to M5-T11,
+  reconciliation and Phase 2 deployment) is not started.
+- M6: not started.
+- Overall: 71 of 82 planned tasks, approximately 87%. Counting basis: `docs/plan.md`
   has 83 Done boxes, including the optional M6-T07 Angular admin panel; 82 excludes
-  it; 65 boxes are ticked. Tasks count equally; this is not an effort or
+  it; 71 boxes are ticked. Tasks count equally; this is not an effort or
   production-readiness estimate.
 
 ## Checklist
@@ -33,7 +36,11 @@ Updated: 2026-11-27. Repository: https://github.com/kubicix/ledgerline (public).
   pod-deletion and rolling-restart resilience, CI jobs `kind` and `compose-validate`.
 - Integration record for M4: [PR #30 checks and merge](https://github.com/kubicix/ledgerline/pull/30).
   Hosted results are under Verification evidence.
-- [ ] M5: reporting, event streaming and reconciliation.
+- [x] M5 part A: Kafka event stream fed through the outbox (second transport, one relay
+  loop per transport, switch `Messaging:Kafka:Enabled` off by default) and the
+  Reporting read model in MongoDB (idempotent projections, rebuild from offset zero,
+  read API). Decisions: [M5 decisions](m5-decisions.md).
+- [ ] M5 part B: reconciliation, Phase 2 deployment and README section.
 - [ ] M6: Blazor UI.
 
 ## Current technology
@@ -46,10 +53,30 @@ Tempo, Prometheus and Grafana), k6 (`grafana/k6:2.4.0`), gitleaks, CodeQL and Tr
 M4 adds kind v0.33.0 (node `kindest/node:v1.37.0`), Helm v4.3.2 with one umbrella
 chart at `deploy/helm/ledgerline` and dev-grade infrastructure templates, and the
 `Microsoft.Extensions.Diagnostics.HealthChecks` broker check.
+M5 part A adds Kafka (`apache/kafka`, KRaft single node) and MongoDB in the Compose
+profile `phase2`, `Confluent.Kafka` (outbox publisher in
+`Ledgerline.BuildingBlocks.Messaging.Kafka`, consumer in Reporting), `MongoDB.Driver`,
+and the Testcontainers Kafka and MongoDb modules.
 Exact verified versions are in ADR 0000. Later-milestone technologies are planned,
-not implemented by M4.
+not implemented by M5 part A.
 
 ## Verification evidence
+
+M5 part A, local (2026-11-28, Windows, Docker Desktop):
+- `dotnet build Ledgerline.slnx -c Release`: 0 warnings, 0 errors.
+- Full suite `dotnet test --solution Ledgerline.slnx --max-parallel-test-modules 1`:
+  566 total, 560 passed, 6 skipped, 0 failed in 11m47s (530 at the end of M4,
+  plus 36 new tests). A first run failed the M1 test `RoundTripTests.Ping_from_one_service_produces_pong_from_the_other` on an at-least-once wire duplicate; the test was fixed (`fc8b109`) and the rerun was green. The local run grew by about 1m20s over M4, so the hosted `build-test` (8 minutes at the end of M4) should stay near 9 to 10 minutes, inside its 15 minute timeout. The 6 skips are the opt-in system tests and the benchmark.
+- System tests (`LEDGERLINE_SYSTEM_TESTS=1`): 6 of 6 passed in 6m05s.
+- `docker compose --profile phase2 up -d --wait kafka mongo` plus `kafka-init` on a
+  fresh project: the three event topics have 6 partitions and `retention.ms=-1`, and
+  `ledgerline.reporting.dead.v1` exists with 1 partition.
+- Default path unchanged: `docker compose config --quiet` passes; `--profile app up
+  --build` with Kafka disabled and `scripts/smoke.sh` printed `SMOKE OK`;
+  `render_test.sh` printed `RENDER OK` on a clean export of HEAD (a working copy with
+  `core.autocrlf=true` can hold a CRLF copy of the chart's `init-databases.sql`, which
+  makes the byte comparison fail locally).
+- gitleaks: no leaks. `dotnet list package --vulnerable --include-transitive`: none.
 
 M4, hosted CI:
 - Pull request #30: `build-test` (7m22s), `security`, `compose-validate`, `analyze`
@@ -129,9 +156,11 @@ without deleting their data.
    [M4 decisions](m4-decisions.md) (including binding kind's host ports to
    `127.0.0.1`) and [M3 decisions](m3-decisions.md) (Dependabot major bumps, nightly
    `k6-smoke`, LICENSE, secret scanning).
-2. Then start at M5-T01. Re-verify the Phase 2 versions in ADR 0000 first, as the
-   plan says, and read the next task's spec in [the plan](plan.md). Create the next
-   branch from updated main. `kind`, `helm` and `kubectl` are installed.
+2. Then start at M5-T07 with the part B handoff (`docs/plan-M5B-HANDOFF.md`, owner
+   file, untracked). Part A's decisions, deferred minors and open owner items are in
+   [M5 decisions](m5-decisions.md); part B appends to that file. Read the next task's
+   spec in [the plan](plan.md) and create the next branch from updated main. `kind`,
+   `helm` and `kubectl` are installed.
 3. Use one fresh named Compose project at a time and stop only that project. Never
    run `down -v`; preserve existing volumes. The system-test harness uses its own
    `ledgerline-systest` project and refuses another Ledgerline project, so stop the
@@ -142,13 +171,15 @@ without deleting their data.
 5. The user-owned `orchestrator-prompt.md` and `docs/plan-M3-HANDOFF.md` are tracked
    on main since 3564d0a; do not edit or delete them. The `.superpowers/` ledger
    stays out of every commit. Stage files by name.
-6. Do not repeat completed tasks or dispatch another M3 or M4 reviewer. Deferred
-   items are in [M3 decisions](m3-decisions.md) and [M4 decisions](m4-decisions.md).
+6. Do not repeat completed tasks or dispatch another M3, M4 or M5 part A reviewer.
+   Deferred items are in [M3 decisions](m3-decisions.md),
+   [M4 decisions](m4-decisions.md) and [M5 decisions](m5-decisions.md).
 7. The kind cluster binds host ports 8080, 8081, 3000 and 8025, the same as Compose;
    run one of them at a time. `scripts/kind-down.*` deletes only the `ledgerline`
    cluster.
 
 Review and inherited minor findings: [M2 review](m2-review.md).
 All execution rulings and deferred costs: [M2 decisions](m2-decisions.md),
-[M3 decisions](m3-decisions.md) and [M4 decisions](m4-decisions.md).
+[M3 decisions](m3-decisions.md), [M4 decisions](m4-decisions.md) and
+[M5 decisions](m5-decisions.md).
 Full scope and remaining tasks: [implementation plan](plan.md).

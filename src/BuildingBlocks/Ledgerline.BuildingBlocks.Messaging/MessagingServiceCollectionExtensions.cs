@@ -29,7 +29,7 @@ public static class MessagingServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configure);
         var types = new MessageTypeRegistry();
         var handlers = new HandlerRegistry(types);
-        var builder = new MessagingBuilder(services, handlers);
+        var builder = new MessagingBuilder(services, handlers, types, configuration);
         configure(builder);
         if (string.IsNullOrWhiteSpace(builder.ServiceName)) throw new InvalidOperationException("Messaging service name is required.");
         services.AddSingleton(types);
@@ -49,7 +49,9 @@ public static class MessagingServiceCollectionExtensions
         if (useOutbox)
         {
             services.TryAddSingleton<OutboxSignal>();
-            services.TryAddSingleton<IOutboxPublisher, RabbitMqOutboxPublisher>();
+            // Enumerable: a transport package registers its own publisher during configure, before this runs.
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IOutboxPublisher, RabbitMqOutboxPublisher>());
+            services.TryAddSingleton<IOutboxRouting, OutboxRouting>();
             services.TryAddScoped<IOutbox, EfOutbox<TDbContext>>();
             services.TryAddScoped<OutboxSaveChangesInterceptor>();
             services.AddDbContext<TDbContext>((sp, options) => options.AddInterceptors(sp.GetRequiredService<OutboxSaveChangesInterceptor>()));

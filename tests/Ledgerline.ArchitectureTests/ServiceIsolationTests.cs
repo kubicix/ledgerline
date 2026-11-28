@@ -44,7 +44,8 @@ public class ServiceIsolationTests
         (actual == typeof(decimal) || actual == typeof(double) || actual == typeof(float));
     private static IEnumerable<Assembly> ProductionAssemblies() => Deployables.Concat([
         typeof(Ledgerline.BuildingBlocks.Money).Assembly, typeof(Ledgerline.BuildingBlocks.Messaging.MessageContext).Assembly,
-        typeof(Ledgerline.BuildingBlocks.Web.WebDefaults).Assembly, typeof(Ledgerline.Contracts.Accounts.AccountOpened).Assembly]).Distinct();
+        typeof(Ledgerline.BuildingBlocks.Web.WebDefaults).Assembly, typeof(Ledgerline.Contracts.Accounts.AccountOpened).Assembly,
+        typeof(Ledgerline.BuildingBlocks.Messaging.Kafka.KafkaOutboxPublisher).Assembly]).Distinct();
 
     private static readonly Assembly[] Deployables =
     [
@@ -52,6 +53,7 @@ public class ServiceIsolationTests
         typeof(Ledgerline.Payments.Program).Assembly,
         typeof(Ledgerline.Risk.Program).Assembly,
         typeof(Ledgerline.Notifications.Program).Assembly,
+        typeof(Ledgerline.Reporting.Program).Assembly,
         typeof(Ledgerline.BankSimulator.Program).Assembly,
         typeof(Ledgerline.Gateway.Program).Assembly,
     ];
@@ -75,7 +77,7 @@ public class ServiceIsolationTests
     [Fact]
     public void BankSimulator_and_Gateway_do_not_reference_contracts_or_messaging()
     {
-        string[] forbidden = ["Ledgerline.Contracts", "Ledgerline.BuildingBlocks.Messaging"];
+        string[] forbidden = ["Ledgerline.Contracts", "Ledgerline.BuildingBlocks.Messaging", "Ledgerline.BuildingBlocks.Messaging.Kafka"];
         Assembly[] edge = [typeof(Ledgerline.BankSimulator.Program).Assembly, typeof(Ledgerline.Gateway.Program).Assembly];
 
         foreach (var assembly in edge)

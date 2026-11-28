@@ -4,6 +4,7 @@ using Ledgerline.Accounts.Features.Accounts;
 using Ledgerline.Accounts.Features.Ledger;
 using Ledgerline.Accounts.Ledger;
 using Ledgerline.BuildingBlocks.Messaging;
+using Ledgerline.BuildingBlocks.Messaging.Kafka;
 using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.Contracts.Accounts;
@@ -38,10 +39,19 @@ builder.Services.AddSingleton<LedgerMetrics>();
 builder.Services.AddHostedService(services => services.GetRequiredService<LedgerMetrics>());
 builder.Services.AddScoped<LedgerOperationRunner>();
 builder.Services.AddScoped<IPostCommitHook>(services => services.GetRequiredService<LedgerOperationRunner>());
-builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging => messaging.Service("accounts")
-    .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>()
-    .Consume<ReserveFunds, ReserveFundsHandler>().Consume<CaptureFunds, CaptureFundsHandler>().Consume<ReleaseFunds, ReleaseFundsHandler>()
-    .Consume<RefundFunds, RefundFundsHandler>());
+builder.Services.AddLedgerlineMessaging<AccountsDbContext>(builder.Configuration, messaging =>
+{
+    messaging.Service("accounts")
+        .Consume<CreditTopUp, CreditTopUpHandler>().Consume<TransferFunds, TransferFundsHandler>()
+        .Consume<ReserveFunds, ReserveFundsHandler>().Consume<CaptureFunds, CaptureFundsHandler>().Consume<ReleaseFunds, ReleaseFundsHandler>()
+        .Consume<RefundFunds, RefundFundsHandler>();
+    // Off by default: without it no Kafka row is written and no Kafka client is created (reporting.md section 2).
+    if (builder.Configuration.GetValue<bool>("Messaging:Kafka:Enabled"))
+        messaging
+            .AlsoPublishToKafkaExpanded<JournalEntryPosted, JournalEntryLinePosted>("ledgerline.ledger.entries.v1",
+                JournalEntryLinePosted.From, line => line.AccountId.ToString())
+            .AlsoPublishToKafka<Ledgerline.Contracts.Accounts.AccountOpened>("ledgerline.accounts.events.v1", opened => opened.AccountId.ToString());
+});
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
