@@ -119,7 +119,7 @@ public sealed class Phase2SystemTests(Phase2ComposeStack fixture) : IAsyncDispos
         (await ReconciledAtAsync(client, tampered, ct)).ShouldBeNull();
 
         await Eventually.ShouldAsync(() => MismatchMailArrivedAsync(today, tampered, ct), StepTimeout,
-            $"No mismatch mail for {tampered} reached {OperationsEmail} in Mailpit.");
+            $"No mismatch mail for {tampered} reached the operations mailbox in Mailpit.");
         await LedgerAssert.InvariantsHoldAsync(SystemInvariants.AccountsDatabase);
     }
 

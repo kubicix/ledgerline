@@ -114,7 +114,8 @@ flowchart LR
 ```
 
 The Compose `rabbitmq-init` job declares `local.events`, a durable quorum queue
-bound to journal-entry-posted, payment-completed and payment-failed events. It retains
+bound to journal-entry-posted, payment-completed and payment-failed events, and to
+`reconciliation.event.reconciliation-completed.v1` on the `ledgerline.reconciliation` exchange. It retains
 events whose business consumers arrive in later milestones, so mandatory publication
 can complete. It does not
 consume commands or replay events to future services. The queue retains local demo
@@ -329,7 +330,12 @@ docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile ph
 ```
 
 Switching Phase 2 on by upgrading a running default release is not supported; [docs/kubernetes.md](docs/kubernetes.md)
-explains why. The system tests `Read_model_catches_up_and_matches_ledger_after_workload` and
+explains why. Phase 2 also needs a PostgreSQL data directory initialised by this version of
+`deploy/compose/postgres/init-databases.sql`, which runs only on an empty data directory and creates the
+`reconciliation` login and database. With an older volume, use a fresh Compose project
+(`docker compose -p <new-name> ...`) or a fresh kind cluster (`./scripts/kind-down.sh && ./scripts/kind-up.sh`), or
+create the role and database once by hand:
+`CREATE USER reconciliation WITH PASSWORD 'reconciliation_dev'; CREATE DATABASE reconciliation_db OWNER reconciliation;`. The system tests `Read_model_catches_up_and_matches_ledger_after_workload` and
 `Reconciliation_of_today_is_clean_after_workload_and_flags_a_tampered_row`
 ([Phase2SystemTests.cs](tests/Ledgerline.SystemTests/Phase2SystemTests.cs)) run on their own Compose project with this
 stack shape: the first checks that every statement catches up with the ledger balance after a workload, the second

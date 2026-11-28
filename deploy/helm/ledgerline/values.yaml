@@ -198,8 +198,11 @@ infra:
       limits:
         memory: 1Gi
 
-  # With enabled=false an external broker needs what files/local-events.json declares (the local.events queue bound to
-  # accounts.event.journal-entry-posted.v1), or the Accounts relay stalls on that unroutable event.
+  # With enabled=false an external broker needs what files/local-events.json declares: the local.events queue bound to
+  # accounts.event.journal-entry-posted.v1, payments.event.payment-completed.v1, payments.event.payment-failed.v1 and
+  # reconciliation.event.reconciliation-completed.v1 (exchange ledgerline.reconciliation). Without these the Accounts
+  # relay stalls on an unroutable event, and the Reconciliation outbox stops at its completion event (mandatory
+  # publish, NO_ROUTE).
   rabbitmq:
     enabled: true
     image: rabbitmq:4.4-management
