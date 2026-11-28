@@ -150,3 +150,82 @@ Fable audit (clean on Critical and Important):
 - F1: the Reporting dead-letter producer is not replaced after a fatal error; a restart is the only recovery for now.
 - Hosted build-test time is estimated to grow by about 1 to 2 minutes from the new Reporting and Kafka tests; to be confirmed on the pull request.
 - Docker test volumes: Testcontainers Kafka and MongoDB runs leave anonymous volumes on the host. Deleting volumes was out of scope for this run.
+
+# Part B (M5-T07 to M5-T11)
+
+Branch `milestone-5b` on BASE `df38ea7`. Each entry states what was decided, why, and what it costs if wrong.
+
+## Rulings, part B
+
+Setup and pre-flight:
+- Setup: Ruling: Implementers never commit. The orchestrator re-runs the Prove command and the build, ticks Done, and commits once per task with the plan's message; review fixes land as separate `fix:` commits. Cost if wrong: history only.
+- Setup: Ruling: The handoff corrections C1 to C5 are binding; they are listed under "Spec deviations recorded, spec unchanged, part B". Cost if wrong: see that section.
+- Setup: Ruling: Before Task 7, `ReportingHost.CommittedOffsetAsync` (`tests/Ledgerline.Reporting.IntegrationTests/ReportingHost.cs`) got a 5 s request timeout and returns null on a Kafka timeout, so only the overall `Eventually` timeout fails a test (`94a8fa6`). Cost if wrong: the one non-`Eventually` negative check in `AccountStatementTests` passes vacuously on a broker timeout.
+- Setup: Ruling: The first Reporting integration run after that fix crashed natively (exit -1073741819, 0 tests); two reruns passed 20 of 20. Treated as a host intermittent. Cost if wrong: an unreproduced native crash in the Reporting test host on CI.
+- Setup: Ruling: Quartz 4.7.3 re-verified on nuget.org: Apache-2.0, `lib/net10.0`. `Quartz.Extensions.Hosting` and `Quartz.Serialization.SystemTextJson` 4.7.3 are empty shim packages; the hosted service, the System.Text.Json serializer, the PostgreSQL delegate and clustering are in `Quartz.dll`. Only `Quartz` is referenced. Cost if wrong: none functionally.
+- Setup: Ruling: No package ships the job store SQL. The `qrtz_` script is taken verbatim from the quartznet repository at tag `v4.7.3` (commit f002ad0, the commit the package names), `database/tables/tables_postgres.sql`, and embedded in the `Initial` migration. Cost if wrong: none.
+- Setup: Ruling (owner, in chat): the run ends with push, pull request and merge after the final gate, and an M6 handoff. This overrides the handoff's "nothing pushed" for the end of this run only. Cost if wrong: the owner wanted to merge personally.
+
+Task 7 (matcher and parser):
+- Task 7: Ruling: The business-date window is `[D 00:00Z, D+1 00:00Z)` for bank rows, staged payments and ledger lines. Only the "known payment" test of `UnknownBankRecord` uses every staged payment. A top-up straddling midnight reports on both days by design. Cost if wrong: a midnight-straddling top-up gives items a human clears.
+- Task 7: Ruling: A compensated payment with a bank capture, no refund and no ledger entry matches two rows of the table; invariant C4 decides, so only `RefundMissingAtBank` is reported. An unknown bank reference yields only `UnknownBankRecord`. Otherwise codes are independent. Cost if wrong: fewer items than a literal reading in those two cases.
+- Task 7: Ruling: Item fields per code, `LedgerImbalance` with the currency code as reference and the non-zero sum as ledger amount, deterministic ordering, checked arithmetic, and a parser that requires the exact header, six fields, `CAPTURE` or `REFUND`, digits-only amounts, three uppercase letters and an explicit UTC offset, and rejects quotes. Cost if wrong: a bank file with a quoted field fails the run loudly (the simulator never writes one).
+
+Task 8 (staging and schema):
+- Task 8: Ruling: The connection string key is `ConnectionStrings:Database`, the repository convention. Cost if wrong: none.
+- Task 8: Ruling: The migration also creates `inbox_messages` through the existing `AddOutboxAndInbox()` (building-blocks.md section 6), so the shared retention job works unchanged. Cost if wrong: one unused empty table.
+- Task 8: Ruling: One database transaction per Kafka record; offsets are committed only after it committed. Only data errors are poison (payload parse or validation failures, including `ArgumentException`, `FormatException` and `OverflowException` raised while reading the payload, and SQLSTATE classes 22 and 23); every other failure retries without committing. A poison record is logged without payload and counted, and its offset committed (no dead topic exists for Reconciliation). Cost if wrong: a non-data code bug blocks its partition instead of dropping a money record (preferred).
+- Task 8: Ruling: `payment-refunded` is not staged (it is a merchant refund, outside the top-up match). `staged_payments` keeps the latest status by `occurred_at` (`<=`, so equal timestamps resolve by arrival) and never clears a `bank_capture_id` once set. Cost if wrong: an equal-timestamp redelivery overwrites the status of that instant.
+
+Task 9 (run, lock, events):
+- Task 9: Ruling: The claim token is the `started_at` value PostgreSQL returns, always moved strictly forward; claim, reclaim, completion and failure are guarded SQL statements checked by rows affected. Completion writes the run, the items and every outbox row in one transaction and commits with `CancellationToken.None`. Cost if wrong: none found by three reviews and the audit.
+- Task 9: Ruling: A Completed run with `inputs_incomplete = true` is re-runnable (section 8 is the specific rule), but only when the runner saw it in that state on its first decision; after a lost claim race any Completed run exits `AlreadyCompleted`, so concurrent runners never publish two event sets. A re-run republishes its events; Payments stamps `reconciled_at` once; Notifications mails a repeated mismatch again. Cost if wrong: extra mails on re-runs of a lagging day.
+- Task 9: Ruling: A run for a business date that has not ended is always flagged `inputs_incomplete` (it still runs the input wait, because skipping it produced false mismatches), so the 00:30 cron re-runs that date after it ends. Cost if wrong: every on-demand run of today re-publishes its events and re-mails its mismatches.
+- Task 9: Ruling: The Kafka input wait judges the partitions this replica owns plus the group's committed offset; a partition with nothing left to read counts as caught up. Cost if wrong: with two replicas a run judges only its own partitions; idle partitions with an upstream outbox backlog count as caught up.
+- Task 9: Ruling: The Redis lock (`SET NX PX`, token-checked renew and release, TTL 10 minutes renewed every third) is an optimization: Redis unreachable means a warning and the run proceeds. A firing that finds the lock held retries one TTL later, sharing the 6-retry budget. Cost if wrong: extra one-shot triggers that exit `AlreadyCompleted`.
+- Task 9: Ruling: Failures. A bank or parse failure, and since the audit any other non-cancellation failure after the claim, marks the run Failed through the guarded update with a short error text and schedules a retry every 10 minutes up to 6 times; if the failure cannot be written, the retry is still scheduled. Cost if wrong: a code bug retries 6 times before stopping.
+- Task 9: Ruling: Recovery. The job requests Quartz recovery, is interrupted on host shutdown (lock released, run stays Running) and firings cancelled by shutdown are recovered. The cron job and trigger are added with `IgnoreDuplicates`, because `ScheduleTriggerRelativeToReplacedTrigger` did not keep a missed 00:30 in practice. A cron firing reconciles its scheduled fire time's UTC date minus one day. Cost if wrong: a changed cron, misfire or recovery setting reaches an existing database only after its stored job or trigger is deleted; an outage across two or more 00:30s makes up only the earliest missed date.
+- Task 9: Ruling: Test Kafka topics are created with `retention.ms=-1`, as `kafka-init` does, after old record timestamps were found deleted by the default retention (a flake cause). Cost if wrong: none.
+
+Task 10 (API and consumers):
+- Task 10: Ruling: `POST /runs` takes no `Idempotency-Key` (see the deviations). It returns 202 for a Completed date too. Cost if wrong: a client retry schedules a second one-shot trigger that exits at step 2.
+- Task 10: Ruling: The operations notification uses a fixed owner id `0f5c1d2e-8a47-4b69-9c30-6d1e7f2a4b85`, the configured `Notifications:OperationsEmail`, and the unknown-recipient path (retry, then `Skipped` with `RecipientUnknown`) when the address is missing. Cost if wrong: none.
+- Task 10: Ruling: The `reconciled_at` update bumps the Payment row version (`xmin`); a rare overlap with an unlocked saga save raises a concurrency exception that the consumer retry absorbs. Cost if wrong: one retried saga message.
+
+Task 11 (deployment):
+- Task 11: Ruling (owner, in chat): `reconciliation.event.reconciliation-completed.v1` has no consumer, so the relay's mandatory publish got NO_ROUTE forever and blocked the run's other events. `deploy/compose/rabbitmq/local-events.json` (and its chart copy) now declares the `ledgerline.reconciliation` exchange and binds that event to `local.events`. The phase2-off render differs from before only by these definition lines. Cost if wrong: none (no publisher in the default stack).
+- Task 11: Ruling: The system-test harness runs the default stack (project `ledgerline-systest`, profile `app`) unchanged and the Phase 2 stack as a second project `ledgerline-systest-phase2`, one at a time. A same-day local rerun of the Phase 2 class needs `LEDGERLINE_SYSTEM_TESTS_PHASE2_PROJECT=<fresh name>`. Cost if wrong: local rerun friction only.
+- Task 11: Ruling: `Reconciliation_of_today_is_clean_after_workload_and_flags_a_tampered_row` tampers before the run (a completed date with complete inputs cannot be re-run) and asserts exactly one `LedgerEntryNotAtBank` item, the other top-ups reconciled, the mail, and `inputsIncomplete = true` (today has not ended). Cost if wrong: none.
+- Task 11: Ruling: `kind-deploy.sh` and `.ps1` build and load the two Phase 2 images only when `phase2.enabled=true` appears in their arguments (documented). Cost if wrong: a values-file user gets image pull failures.
+- Final: Ruling: The gateway's active health checks against the absent Phase 2 hosts in the default stack are accepted: the two routes answer 503, readiness stays 200. Cost if wrong: a failed probe logged every 10 s.
+- Final: Ruling: The kind proofs (Phase 2 off and on, both on fresh clusters) were run in Task 11 on `935fcbd`; later commits changed runner logic, docs and comments only, not the chart. Cost if wrong: a chart regression after `935fcbd` not exercised on a cluster (the render test still runs).
+
+## Spec deviations recorded, spec unchanged, part B
+
+- C1 (handoff): M5-T11 also edited `tests/Ledgerline.SystemTests/Harness/**`, three steps of `.github/workflows/ci.yml` (images and Trivy for the two new images, `compose-validate` of the override, Phase 2 log collection), the chart templates, `render_test.sh`, `scripts/kind-deploy.*` and `docs/kubernetes.md`. The owner also allowed `deploy/compose/rabbitmq/local-events.json` and its chart copy.
+- C2 (handoff): Phase 2 was proven once on a fresh kind install with `--set phase2.enabled=true`; switching it on by upgrading a running default release is documented as unsupported.
+- C3 (handoff): the 5-minute input wait, the 10-minute lock TTL and its renewal, and the 10-minute retry interval with 6 attempts are configuration options with the spec values as defaults. Tests shorten them and say so; `compose.phase2.yaml` shortens none.
+- C4 (handoff): Reconciliation readiness is its database plus the RabbitMQ `broker` check; Kafka, Redis and Bank Simulator are not readiness dependencies.
+- C5 (handoff): M5-T10 ran the Reconciliation, Payments and Notifications integration projects and the architecture tests instead of the full suite; the full suite ran once at the final gate.
+- `POST /runs` takes no `Idempotency-Key`, against building-blocks.md section 9: the operation is idempotent by business date and `reconciliation_runs` has no idempotency columns.
+- `reconciliation_db` also holds `inbox_messages` (building-blocks.md section 6), which reconciliation.md section 6 does not list.
+- reconciliation.md section 6 shows `UNIQUE (business_date)` inline; the migration uses a unique index (same behavior, tested) and adds an index on `reconciliation_items.run_id`.
+- reconciliation.md section 3 step 2 says a Completed run means the day is done; a Completed run with incomplete inputs is re-runnable (section 8), and a run for an unfinished date is always flagged incomplete.
+
+## Deferred minor findings, part B
+
+- Task 7: `Matcher` tie-break on equal `OccurredAt` and `Status` for duplicate staged payments depends on input order (unreachable under the staging primary key).
+- Task 8: equal `occurred_at` resolves by arrival; no `*.sql eol=lf` rule in `.gitattributes` (pre-existing); one integration poison case exercises the JSON path, not `ReadPayload`; a future `IStagingConsumer` must parse inside `StagingConsumerLoop.ReadPayload`.
+- Task 9: the restart test reads the wall clock (a run across 00:30 or midnight UTC can misbehave); `TryAcquireAsync` ignores its token; a retry actually firing and the stop after 6 are untested; the job-level fallback when the failure cannot be written is untested; the `Superseded` log line is misleading when a commit applied but the client saw an error; no mutation run for the first-decision rule; the attempt `int.Parse` runs outside the try; a replica that owns no partition always waits out the timeout.
+- Task 10: `MismatchDetectedHandler` duplicates the notification insert of `NotificationPlanner`; `GET /runs` reports limit and cursor errors under one key; the operations address is read from configuration per message; the Skipped test does not prove the retries; `StartRunEndpoint.cs` also holds the route map and helpers; the 401 and 403 problem types are not asserted; the end-to-end `POST /runs` test can take up to 90 s.
+- Task 11: the chart's service gating helper round-trips values through YAML (numbers become floats; output identical today); `Phase2SystemTests` creates an `HttpClient` per poll.
+- Audit: re-running a Completed-incomplete date deletes its earlier items before the re-run; if that re-run fails, the date reads Failed with no items while its earlier events are out. The input wait assumes offsets start at 0 (true with unlimited retention).
+
+## Open owner items, part B
+
+- The reconciliation table (reconciliation.md section 3 step 5) uses bank refund rows only to excuse a capture: a Completed top-up with capture, ledger entry and a refund is matched; a lone refund is never reported; refund amounts are never compared; tampering the capture of a compensated top-up is invisible. The code follows the table; extending it is a spec decision.
+- Every extra on-demand run of today re-publishes its event set and re-mails its mismatches (consequence of keeping unfinished dates re-runnable).
+- An outage across two or more 00:30s reconciles only the earliest missed date automatically; later ones need `POST /runs`.
+- Part A: the Compose `kafka` service writes its log to `/tmp/kafka-logs`, not the `kafka-data` volume, so the Compose stream history is lost on `down` and `up` (the chart sets `KAFKA_LOG_DIRS`). Not patched in part B.
+- Docker: about 28 GB of in-use build cache was left by the Phase 2 image builds; removing it needs `docker builder prune -a`, which also drops older cache. Testcontainers runs leave anonymous volumes; none was deleted.
+- The Phase 2 image builds and the second system-test stack shape add hosted CI time; see the progress file for the estimate.

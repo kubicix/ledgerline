@@ -11,12 +11,14 @@ Updated: 2026-11-28. Repository: https://github.com/kubicix/ledgerline (public).
 - M4: complete and merged through [PR #30](https://github.com/kubicix/ledgerline/pull/30)
   (merge commit bff7de0, BASE d0bb564).
 - M5 part A (M5-T01 to M5-T06, Kafka event stream and MongoDB read model): complete
-  on branch `milestone-5a` (BASE f8b8faf). M5 part B (M5-T07 to M5-T11,
-  reconciliation and Phase 2 deployment) is not started.
+  and merged through [PR #31](https://github.com/kubicix/ledgerline/pull/31) (merge
+  commit df38ea7, BASE f8b8faf).
+- M5 part B (M5-T07 to M5-T11, reconciliation and Phase 2 deployment): complete on
+  branch `milestone-5b` (BASE df38ea7).
 - M6: not started.
-- Overall: 71 of 82 planned tasks, approximately 87%. Counting basis: `docs/plan.md`
+- Overall: 76 of 82 planned tasks, approximately 93%. Counting basis: `docs/plan.md`
   has 83 Done boxes, including the optional M6-T07 Angular admin panel; 82 excludes
-  it; 71 boxes are ticked. Tasks count equally; this is not an effort or
+  it; 76 boxes are ticked. Tasks count equally; this is not an effort or
   production-readiness estimate.
 
 ## Checklist
@@ -40,7 +42,11 @@ Updated: 2026-11-28. Repository: https://github.com/kubicix/ledgerline (public).
   loop per transport, switch `Messaging:Kafka:Enabled` off by default) and the
   Reporting read model in MongoDB (idempotent projections, rebuild from offset zero,
   read API). Decisions: [M5 decisions](m5-decisions.md).
-- [ ] M5 part B: reconciliation, Phase 2 deployment and README section.
+- [x] M5 part B: end-of-day reconciliation (pure three-way matcher, Kafka staging,
+  Quartz job on a clustered ADO.NET store, Redis lock, run lifecycle, outbox events,
+  admin API, Payments `reconciled_at`, operations mail) and the Phase 2 deployment
+  (Dockerfiles, Compose profile `phase2` with `compose.phase2.yaml`, gateway routes,
+  Helm `phase2.enabled`, `Phase2SystemTests`, README section).
 - [ ] M6: Blazor UI.
 
 ## Current technology
@@ -57,10 +63,46 @@ M5 part A adds Kafka (`apache/kafka`, KRaft single node) and MongoDB in the Comp
 profile `phase2`, `Confluent.Kafka` (outbox publisher in
 `Ledgerline.BuildingBlocks.Messaging.Kafka`, consumer in Reporting), `MongoDB.Driver`,
 and the Testcontainers Kafka and MongoDb modules.
+M5 part B adds Quartz.NET 4.7.3 (clustered ADO.NET job store on `reconciliation_db`)
+and the Reconciliation service; the Helm chart gains Kafka and MongoDB templates behind
+`phase2.enabled`.
 Exact verified versions are in ADR 0000. Later-milestone technologies are planned,
-not implemented by M5 part A.
+not implemented by M5.
 
 ## Verification evidence
+
+M5 part B, local (2026-11-28, Windows, Docker Desktop), branch `milestone-5b`:
+- `dotnet build Ledgerline.slnx -c Release`: 0 warnings, 0 errors (32 projects).
+- Full suite `dotnet test --solution Ledgerline.slnx --max-parallel-test-modules 1`,
+  with no Compose project and no kind cluster up: 736 total, 728 passed, 8 skipped,
+  0 failed in 12m46s (566 at the end of part A, plus 170 new tests; the 8 skips are
+  the opt-in system tests and the benchmark). The hosted `build-test` (7m37s on part
+  A) should grow by about a minute and stay well inside its 15 minute timeout.
+- System tests (`LEDGERLINE_SYSTEM_TESTS=1`, both stack shapes, the Phase 2 one on a
+  fresh project with `-f compose.yaml -f compose.phase2.yaml --profile app --profile
+  phase2`): 8 of 8 passed in 9m55s, including `Read_model_catches_up_and_matches_ledger_after_workload`
+  and `Reconciliation_of_today_is_clean_after_workload_and_flags_a_tampered_row`.
+  Estimated hosted `system-tests`: about 12 to 15 minutes against its 25 minute test step.
+- Default path unchanged: `docker compose --profile app up --build -d --wait` and
+  `scripts/smoke.sh` on a fresh named project printed `SMOKE OK` (trial balance 0);
+  the two Phase 2 gateway routes answer 503 and readiness stays 200.
+- `render_test.sh`: `RENDER OK`, asserting `phase2.enabled` false and true and
+  `infraOnly=true` with Phase 2; the chart's `files/` copies are byte-identical to
+  their sources.
+- kind (Task 11, on fresh clusters): default `kind-deploy` plus `smoke.sh
+  http://localhost:8080` printed `SMOKE OK` with 12 pods; `kind-deploy --set
+  phase2.enabled=true` as a first install gave 16 of 16 pods Ready, `SMOKE OK`, and a
+  Reporting statement and `GET /api/reconciliation/runs` answered 200 through the
+  gateway (node memory 5.1 of 15.5 GiB).
+- Trivy 0.70.0 on `ledgerline-reporting:local` and `ledgerline-reconciliation:local`:
+  clean for HIGH and CRITICAL with a fix available. gitleaks: no leaks.
+  `dotnet list package --vulnerable --include-transitive`: none.
+- Reviews: per-task reviews, one whole-branch Opus review (no Critical; its Important
+  findings fixed in `4b335c6`) and one Fable audit of the matcher and the run (no
+  Critical; its two Important findings fixed in `08503c9` and re-reviewed). Rulings,
+  deviations, deferred minors and owner items: [M5 decisions](m5-decisions.md).
+- Not yet verified: the hosted checks on the pull request and on `main` after the merge
+  (`images` now builds eight images; `system-tests` now runs two stack shapes).
 
 M5 part A, local (2026-11-28, Windows, Docker Desktop):
 - `dotnet build Ledgerline.slnx -c Release`: 0 warnings, 0 errors.
@@ -152,26 +194,30 @@ without deleting their data.
 
 ## Continuation instructions
 
-1. Open owner decisions before or alongside M5: the items in
-   [M4 decisions](m4-decisions.md) (including binding kind's host ports to
+1. Open owner decisions before or alongside M6: the items in
+   [M5 decisions](m5-decisions.md) (part A and part B open owner items, among them the
+   reconciliation refund-row gap, the Compose Kafka log directory and `contactEmail`
+   on Kafka), [M4 decisions](m4-decisions.md) (including binding kind's host ports to
    `127.0.0.1`) and [M3 decisions](m3-decisions.md) (Dependabot major bumps, nightly
    `k6-smoke`, LICENSE, secret scanning).
-2. Then start at M5-T07 with the part B handoff (`docs/plan-M5B-HANDOFF.md`, owner
-   file, untracked). Part A's decisions, deferred minors and open owner items are in
-   [M5 decisions](m5-decisions.md); part B appends to that file. Read the next task's
-   spec in [the plan](plan.md) and create the next branch from updated main. `kind`,
-   `helm` and `kubectl` are installed.
+2. Then start at M6-T01 with an M6 handoff, from updated main on a new branch. Read the
+   next task's spec in [the plan](plan.md). `kind`, `helm` and `kubectl` are installed.
+   Phase 2 needs a PostgreSQL data directory created by the current
+   `init-databases.sql` (fresh Compose project or fresh kind cluster); see the README.
 3. Use one fresh named Compose project at a time and stop only that project. Never
    run `down -v`; preserve existing volumes. The system-test harness uses its own
    `ledgerline-systest` project and refuses another Ledgerline project, so stop the
    default one before running system tests.
 4. Avoid building shared output DLLs while test processes use them on Windows. Run
    full integration modules serially (`--max-parallel-test-modules 1`). The full
-   suite takes about 11 minutes; run focused tests unless the full suite is required.
+   suite takes about 13 minutes; run focused tests unless the full suite is required.
+   The system tests run two stack shapes one after the other (`ledgerline-systest`
+   and `ledgerline-systest-phase2`); a same-day local rerun of `Phase2SystemTests`
+   needs `LEDGERLINE_SYSTEM_TESTS_PHASE2_PROJECT=<fresh name>`.
 5. The user-owned `orchestrator-prompt.md` and `docs/plan-M3-HANDOFF.md` are tracked
    on main since 3564d0a; do not edit or delete them. The `.superpowers/` ledger
    stays out of every commit. Stage files by name.
-6. Do not repeat completed tasks or dispatch another M3, M4 or M5 part A reviewer.
+6. Do not repeat completed tasks or dispatch another M3, M4 or M5 reviewer.
    Deferred items are in [M3 decisions](m3-decisions.md),
    [M4 decisions](m4-decisions.md) and [M5 decisions](m5-decisions.md).
 7. The kind cluster binds host ports 8080, 8081, 3000 and 8025, the same as Compose;
