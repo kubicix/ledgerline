@@ -62,9 +62,10 @@ public sealed class Phase2SystemTests(Phase2ComposeStack fixture) : IAsyncDispos
 
     /// <remarks>
     /// Reconciles the current UTC day, which is not over yet: the run does not wait for records past midnight but for
-    /// every partition to have nothing left to read (the quiet-partition rule of its Kafka wait). A workload that crosses
-    /// midnight UTC splits across two business dates and fails this test; rerun it after midnight. A Completed run with
-    /// complete inputs is final for its date, so on kept volumes this test passes once per UTC day and project.
+    /// every partition to have nothing left to read (the quiet-partition rule of its Kafka wait). Because the day has not
+    /// ended, the run is flagged inputs_incomplete and stays re-runnable: the 00:30 run takes it over after midnight. A
+    /// workload that crosses midnight UTC splits across two business dates and fails this test; rerun it after midnight.
+    /// The pre-check below still wants no run for the date: a second run would re-run it and publish its events again.
     /// </remarks>
     [Fact(Skip = ComposeStack.SkipReason, SkipUnless = nameof(ComposeStack.Enabled), SkipType = typeof(ComposeStack))]
     public async Task Reconciliation_of_today_is_clean_after_workload_and_flags_a_tampered_row()
@@ -106,7 +107,8 @@ public sealed class Phase2SystemTests(Phase2ComposeStack fixture) : IAsyncDispos
             return result?.Status == "Completed";
         }, RunTimeout, $"The reconciliation run of {date} did not complete (last seen: {result}).");
 
-        result!.InputsIncomplete.ShouldBeFalse();
+        // Today has not ended, so the run is never final (I-1).
+        result!.InputsIncomplete.ShouldBeTrue();
         var items = await client.GetAsync<IReadOnlyList<ItemDto>>(KeycloakTokens.Admin, $"/api/reconciliation/runs/{date}/items", ct);
         var item = items.ShouldHaveSingleItem();
         item.ShouldBe(new ItemDto("LedgerEntryNotAtBank", tampered.ToString(), null, 2_500, Workloads.Currency));

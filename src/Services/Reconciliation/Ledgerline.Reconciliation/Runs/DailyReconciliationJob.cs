@@ -34,9 +34,10 @@ public sealed class RetryOptions
 /// injected clock); fired by a one-shot trigger it reconciles the date in the trigger's data. A run that ends Failed
 /// schedules a one-shot retry of the same date <see cref="RetryOptions.Interval"/> later; a run that found the date's
 /// lock held schedules one a lock TTL later (the holder may be a node that died with the lock). Both carry the attempt
-/// count and share one budget of <see cref="RetryOptions.MaxAttempts"/> retries. Every other exception is logged and
-/// swallowed: the run stays Running until a run of that date is started again, and the cron trigger never counts a
-/// failed fire.
+/// count and share one budget of <see cref="RetryOptions.MaxAttempts"/> retries. An unexpected failure ends the run
+/// Failed inside the runner; if even that cannot be written (the database away), or nothing was claimed yet, the
+/// exception reaches the job, which logs it and schedules the same retry, so the date is never dropped. The exception
+/// is not rethrown, so the cron trigger never counts a failed fire.
 /// </summary>
 /// <remarks>
 /// The job requests recovery: when the scheduler instance running it dies mid-run, another node of the cluster (or this
@@ -80,16 +81,19 @@ public sealed partial class DailyReconciliationJob(
         }
         catch (Exception error)
         {
+            // A Running row left behind (the failure could not be recorded) is taken over by the retry at step 2.
             RunCrashed(logger, businessDate, error);
+            await ScheduleRetryAsync(context.Scheduler, businessDate, attempt, retry.Interval, cancellationToken);
         }
     }
 
     /// <summary>
     /// The business date a firing reconciles. A one-shot firing (manual or retry) carries it in its data, and so does its
-    /// recovery, which keeps the original trigger's data. A cron firing reconciles the day before: before now, or, for a
-    /// recovery, before the scheduled fire time of the firing it replays, which the recovery trigger's data holds (and
-    /// <see cref="IJobExecutionContext.ScheduledFireTimeUtc"/> repeats). A recovery that runs after midnight therefore
-    /// still reconciles the interrupted date, not the next one.
+    /// recovery, which keeps the original trigger's data. A cron firing reconciles the day before the 00:30 it was
+    /// scheduled for (<see cref="IJobExecutionContext.ScheduledFireTimeUtc"/>), not the day before now, so a missed fire
+    /// made up after the next midnight still reconciles its own date. A recovery reads the scheduled time of the firing
+    /// it replays from the recovery trigger's data (which <see cref="IJobExecutionContext.ScheduledFireTimeUtc"/>
+    /// repeats). Now is the last resort, for a context that reports no scheduled time.
     /// </summary>
     public static DateOnly BusinessDateOf(IJobExecutionContext context, DateTimeOffset now)
     {
@@ -97,8 +101,8 @@ public sealed partial class DailyReconciliationJob(
         var data = context.MergedJobDataMap;
         if (data.TryGetString(BusinessDateKey, out var date) && date is not null)
             return DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var reference = context.Recovering ? OriginalScheduledFireTime(data) ?? context.ScheduledFireTimeUtc ?? now : now;
-        return DateOnly.FromDateTime(reference.UtcDateTime).AddDays(-1);
+        var scheduled = context.Recovering ? OriginalScheduledFireTime(data) ?? context.ScheduledFireTimeUtc : context.ScheduledFireTimeUtc;
+        return DateOnly.FromDateTime((scheduled ?? now).UtcDateTime).AddDays(-1);
     }
 
     /// <summary>The recovery trigger's record of the replayed firing's scheduled time: Unix milliseconds or a date-time text.</summary>
@@ -166,7 +170,7 @@ public sealed partial class DailyReconciliationJob(
     private static partial void RunEnded(ILogger logger, DateOnly businessDate, RunOutcome outcome, int attempt);
     [LoggerMessage(2, LogLevel.Warning, "The run of {BusinessDate} was interrupted by shutdown; it stays Running and the firing is handed back for recovery")]
     private static partial void RunInterrupted(ILogger logger, DateOnly businessDate);
-    [LoggerMessage(3, LogLevel.Error, "The run of {BusinessDate} crashed; it stays Running until a run of that date is started again")]
+    [LoggerMessage(3, LogLevel.Error, "The run of {BusinessDate} crashed before its failure could be recorded; it is retried")]
     private static partial void RunCrashed(ILogger logger, DateOnly businessDate, Exception error);
     [LoggerMessage(4, LogLevel.Error, "The run of {BusinessDate} did not complete on retry {Attempt}, the last one; no further retry")]
     private static partial void RetriesExhausted(ILogger logger, DateOnly businessDate, int attempt);

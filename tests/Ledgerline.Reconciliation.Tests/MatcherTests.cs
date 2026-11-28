@@ -226,6 +226,18 @@ public sealed class MatcherTests
     }
 
     [Fact]
+    public void The_trial_balance_ends_just_before_the_end_of_the_business_date()
+    {
+        // Day is 2026-11-13, so its end E is 2026-11-14T00:00Z: a line at exactly E belongs to the next day.
+        var end = new DateTimeOffset(2026, 11, 14, 0, 0, 0, TimeSpan.Zero);
+        var atEnd = new StagedLedgerLine(Guid.NewGuid(), 1, Wallet, false, "Transfer", "Credit", 30, "TRY", Guid.NewGuid(), end);
+        var justBefore = new StagedLedgerLine(Guid.NewGuid(), 1, Wallet, false, "Transfer", "Credit", 40, "TRY", Guid.NewGuid(), end.AddTicks(-1));
+
+        Run([], [], [atEnd]).Mismatches.ShouldBeEmpty();
+        Run([], [], [justBefore]).Mismatches.ShouldBe([new Mismatch(MismatchCode.LedgerImbalance, "TRY", null, 40, "TRY")]);
+    }
+
+    [Fact]
     public void LedgerImbalance_does_not_unmatch_a_payment()
     {
         var lone = new StagedLedgerLine(Guid.NewGuid(), 1, Wallet, false, "Transfer", "Credit", 70, "TRY", Guid.NewGuid(), Noon);

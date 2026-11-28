@@ -15,11 +15,21 @@ public sealed class DailyReconciliationJobTests
     private static readonly DateTimeOffset Scheduled = new(2026, 11, 28, 0, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public void Cron_fire_reconciles_the_day_before_now()
+    public void Cron_fire_reconciles_the_day_before_its_scheduled_time()
     {
         var context = Context(Cron(), recovering: false, fired: Scheduled.AddSeconds(2));
 
         DailyReconciliationJob.BusinessDateOf(context, Scheduled.AddSeconds(2)).ShouldBe(new DateOnly(2026, 11, 27));
+    }
+
+    [Fact]
+    public void Cron_fire_made_up_after_the_next_midnight_reconciles_its_own_date()
+    {
+        // The 00:30 of the 28th was missed and is made up at 00:05 on the 29th: it still reconciles the 27th.
+        var madeUp = new DateTimeOffset(2026, 11, 29, 0, 5, 0, TimeSpan.Zero);
+        var context = Context(Cron(), recovering: false, fired: madeUp);
+
+        DailyReconciliationJob.BusinessDateOf(context, madeUp).ShouldBe(new DateOnly(2026, 11, 27));
     }
 
     [Fact]

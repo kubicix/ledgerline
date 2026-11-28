@@ -26,7 +26,7 @@ public enum RunOutcome
     /// <summary>Another runner claimed the run meanwhile; this call wrote and published nothing.</summary>
     Superseded,
 
-    /// <summary>The settlement file could not be fetched or parsed; the run is Failed with the error.</summary>
+    /// <summary>The settlement file could not be fetched or parsed, or a step failed unexpectedly; the run is Failed with the error.</summary>
     Failed,
 }
 
@@ -62,14 +62,45 @@ public sealed partial class ReconciliationRunner(
         }
     }
 
-    /// <summary>Steps 3 to 7 for a run this runner has claimed.</summary>
+    /// <summary>
+    /// Steps 3 to 7 for a run this runner has claimed. Any failure other than cancellation sets the run Failed with a
+    /// short error text, so the job's retry chain (section 8) applies and the row says what went wrong; cancellation
+    /// leaves it Running for recovery.
+    /// </summary>
     private async Task<RunOutcome> ReconcileAsync(Claim claim, CancellationToken ct)
     {
-        var complete = await inputs.WaitAsync(claim.BusinessDate, ct);
+        try
+        {
+            return await ReconcileStepsAsync(claim, ct);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The failed step may have left rows tracked (the items and outbox rows of step 7); none of them is written.
+            db.ChangeTracker.Clear();
+            RunCrashed(logger, claim.BusinessDate, error);
+            return await FailAsync(claim, Describe(error), ct);
+        }
+    }
+
+    private async Task<RunOutcome> ReconcileStepsAsync(Claim claim, CancellationToken ct)
+    {
+        // A date that has not ended yet can still receive records: a run of it is never final (I-1). It is flagged
+        // incomplete, so it stays re-runnable and the daily run takes it over after the day ends. The wait still runs:
+        // it makes the run see what staging has received so far.
+        var ended = claim.End <= clock.UtcNow;
+        if (!ended) DateNotEnded(logger, claim.BusinessDate);
+        var complete = await inputs.WaitAsync(claim.BusinessDate, ct) && ended;
         var settlement = await FetchSettlementAsync(claim.BusinessDate, ct);
         if (settlement.Error is { } error) return await FailAsync(claim, error, ct);
         var result = Matcher.Match(settlement.Records, await LoadPaymentsAsync(ct), await LoadLedgerAsync(claim.End, ct), claim.BusinessDate);
         return await CompleteAsync(claim, result, inputsIncomplete: !complete, ct);
+    }
+
+    /// <summary>The run's error text for an unexpected failure: the exception type and the start of its message, nothing else.</summary>
+    private static string Describe(Exception error)
+    {
+        var message = error.Message.ReplaceLineEndings(" ");
+        return $"{error.GetType().Name}: {(message.Length <= 200 ? message : message[..200])}";
     }
 
     /// <summary>
@@ -264,4 +295,8 @@ public sealed partial class ReconciliationRunner(
     private static partial void RunFailed(ILogger logger, DateOnly businessDate, string error);
     [LoggerMessage(6, LogLevel.Information, "The run of {BusinessDate} completed: {Matched} matched, {Mismatched} mismatched, inputs incomplete {InputsIncomplete}")]
     private static partial void RunCompleted(ILogger logger, DateOnly businessDate, int matched, int mismatched, bool inputsIncomplete);
+    [LoggerMessage(7, LogLevel.Information, "The business date {BusinessDate} has not ended; the run is flagged inputs_incomplete and is re-run after it ends")]
+    private static partial void DateNotEnded(ILogger logger, DateOnly businessDate);
+    [LoggerMessage(8, LogLevel.Error, "The run of {BusinessDate} failed unexpectedly; it is set Failed and retried")]
+    private static partial void RunCrashed(ILogger logger, DateOnly businessDate, Exception error);
 }

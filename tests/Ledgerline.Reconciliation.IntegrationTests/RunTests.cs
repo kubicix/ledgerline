@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Ledgerline.Accounts.Infrastructure;
+using Ledgerline.BuildingBlocks;
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
@@ -366,7 +367,10 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         var now = DateTimeOffset.UtcNow;
         var lastFire = new DateTimeOffset(now.UtcDateTime.Date.AddMinutes(30), TimeSpan.Zero);
         if (lastFire > now) lastFire = lastFire.AddDays(-1);
-        var yesterday = DateOnly.FromDateTime(now.UtcDateTime).AddDays(-1);
+        // The missed fire is the 00:30 before the last one, so it is made up after a midnight: it must reconcile its own
+        // date (the day before its scheduled time), not yesterday.
+        var missed = lastFire.AddDays(-1);
+        var missedDate = DateOnly.FromDateTime(missed.UtcDateTime).AddDays(-1);
         string connectionString;
         await using (var first = await StagingHost.StartAsync(infrastructure, extraSettings: settings))
         {
@@ -374,24 +378,24 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
             await Eventually.ShouldAsync(async () => (await RowsAsync(first, "SELECT trigger_name FROM qrtz_cron_triggers")).Count == 1,
                 TimeSpan.FromSeconds(30), "The daily trigger was not stored.");
         }
-        // Every node was down over the last 00:30: the stored trigger last fired the day before and is still due.
+        // Every node was down over the last two 00:30s: the stored trigger last fired the day before the missed one.
         await using (var connection = new NpgsqlConnection(connectionString))
         {
             await connection.OpenAsync(Ct);
             await using var command = new NpgsqlCommand("""
                 UPDATE qrtz_triggers SET prev_fire_time = @previous, next_fire_time = @next WHERE trigger_name = @name
                 """, connection);
-            command.Parameters.AddWithValue("previous", lastFire.AddDays(-1).UtcTicks);
-            command.Parameters.AddWithValue("next", lastFire.UtcTicks);
+            command.Parameters.AddWithValue("previous", missed.AddDays(-1).UtcTicks);
+            command.Parameters.AddWithValue("next", missed.UtcTicks);
             command.Parameters.AddWithValue("name", DailyReconciliationJob.DailyTriggerKey.Name);
             (await command.ExecuteNonQueryAsync(Ct)).ShouldBe(1);
         }
 
-        // The restart re-declares the trigger; the missed fire happens once now, for yesterday.
+        // The restart keeps the stored trigger; the missed fire happens once now, for its own date.
         await using var restarted = await ServiceHost<Program>.StartOnDatabaseAsync(infrastructure, connectionString, settings: settings);
         await Eventually.ShouldAsync(async () => (await DatesAsync(connectionString)).Count > 0, TimeSpan.FromSeconds(90),
             "The missed daily fire was not made up.");
-        (await DatesAsync(connectionString)).ShouldBe([yesterday]);
+        (await DatesAsync(connectionString)).ShouldBe([missedDate]);
         var scheduler = await restarted.Services.GetRequiredService<ISchedulerFactory>().GetScheduler(Ct);
         (await scheduler.GetTrigger(DailyReconciliationJob.DailyTriggerKey, Ct))!.NextFireTimeUtc.ShouldBe(lastFire.AddDays(1));
     }
@@ -477,6 +481,121 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         // The run belongs to the other runner: still Running, no error of ours.
         var run = await RunRowAsync(host, date);
         (run.Status, run.Error).ShouldBe(("Running", (string?)null));
+        (await OutboxAsync(host)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_for_today_is_rerun_after_the_day_ends()
+    {
+        // "Today" by the injected clock: 14:00 on the business date, so its end E lies ahead.
+        var date = new DateOnly(2026, 11, 15);
+        var clock = new SettableClock(new DateTimeOffset(2026, 11, 15, 14, 0, 0, TimeSpan.Zero));
+        // The payment records stay unstaged until the run has started, so the run only sees them by waiting for staging.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var scenario = await StartAsync(date, overrides: services =>
+        {
+            services.AddSingleton<IClock>(clock);
+            services.RemoveAll<IStagingConsumer>();
+            services.AddSingleton<IStagingConsumer, LedgerStagingConsumer>();
+            services.AddSingleton<IStagingConsumer>(new GatedStagingConsumer(new PaymentStagingConsumer(), gate.Task));
+        }, produceInputs: false);
+        try
+        {
+            await scenario.Host.WaitForCommitAsync(await scenario.ProduceLedgerAsync());
+            await scenario.ProducePaymentsAsync();
+            var today = Task.Run(scenario.RunAsync, Ct);
+            await Eventually.ShouldAsync(async () => (await RowsAsync(scenario.Host, "SELECT status FROM reconciliation_runs")).SequenceEqual(["Running"]),
+                TimeSpan.FromSeconds(60), "The run of today did not start.");
+            gate.TrySetResult();
+            (await today).ShouldBe(RunOutcome.Completed);
+        }
+        finally
+        {
+            gate.TrySetResult();
+        }
+        // It waited for what staging had received, and is not final: the day can still receive records.
+        var first = await RunRowAsync(scenario.Host, date);
+        (first.Status, first.InputsIncomplete, first.Matched, first.Mismatched).ShouldBe(("Completed", true, 3, 0));
+
+        // After the end of the day the next run (the 00:30 cron, here a direct run) takes it over.
+        clock.Set(new DateTimeOffset(2026, 11, 16, 0, 30, 0, TimeSpan.Zero));
+        (await scenario.RunAsync()).ShouldBe(RunOutcome.Completed);
+
+        var second = await RunRowAsync(scenario.Host, date);
+        (second.Id, second.Status, second.InputsIncomplete, second.Matched).ShouldBe((first.Id, "Completed", false, 3));
+        (await ItemsAsync(scenario.Host)).ShouldBeEmpty();
+        var outbox = await OutboxAsync(scenario.Host);
+        outbox.Where(x => x.Type == CompletedType).Select(x => x.Payload<ReconciliationCompleted>().InputsIncomplete)
+            .ShouldBe([true, false], ignoreOrder: true);
+        outbox.Count(x => x.Type == ReconciledType).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Unexpected_failure_marks_run_Failed_and_the_retry_completes()
+    {
+        var date = new DateOnly(2026, 11, 16);
+        // Step 7's save fails once (a database error, say), through the scheduled job.
+        var failOnce = new FailFirstCompletion();
+        await using var scenario = await StartAsync(date,
+            overrides: services => services.AddDbContext<Infrastructure.ReconciliationDbContext>((_, options) => options.AddInterceptors(failOnce)),
+            settings: new() { ["Reconciliation:Scheduler:Enabled"] = "true" });
+        var scheduler = await scenario.Host.Services.GetRequiredService<ISchedulerFactory>().GetScheduler(Ct);
+
+        await scenario.Host.Services.GetRequiredService<IRunTrigger>().TriggerAsync(date, Ct);
+
+        var retryKey = DailyReconciliationJob.RetryTriggerKey(date, 1);
+        await Eventually.ShouldAsync(async () => await scheduler.GetTrigger(retryKey, Ct) is not null, TimeSpan.FromSeconds(60),
+            "The failed run scheduled no retry.");
+        var failed = await RunRowAsync(scenario.Host, date);
+        failed.Status.ShouldBe("Failed");
+        failed.Error.ShouldBe("InvalidOperationException: Injected failure of the completing save.");
+        (await ItemsAsync(scenario.Host)).ShouldBeEmpty();
+        (await OutboxAsync(scenario.Host)).ShouldBeEmpty();
+
+        // The retry is due in 10 minutes (the default); fire it now instead.
+        await scheduler.RescheduleJob(retryKey, TriggerBuilder.Create().WithIdentity(retryKey).ForJob(DailyReconciliationJob.Key)
+            .UsingJobData(DailyReconciliationJob.BusinessDateKey, "2026-11-16").UsingJobData(DailyReconciliationJob.AttemptKey, "1")
+            .StartNow().Build(), Ct);
+        await Eventually.ShouldAsync(async () => (await RunRowAsync(scenario.Host, date)).Status == "Completed", TimeSpan.FromSeconds(60),
+            "The retry did not complete the run.");
+
+        var run = await RunRowAsync(scenario.Host, date);
+        (run.Id, run.Matched, run.Mismatched, run.Error).ShouldBe((failed.Id, 3, 0, (string?)null));
+        (await OutboxAsync(scenario.Host)).Select(x => x.Type).ShouldBe([CompletedType, ReconciledType], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Malformed_settlement_file_marks_run_Failed()
+    {
+        var date = new DateOnly(2026, 11, 17);
+        await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: RunSettings(), overrides: services =>
+            services.AddSingleton(new BankSettlementClient(new HttpClient(new BankAnswer(HttpStatusCode.OK, "date;amount\n2026-11-17;12\n"))
+                { BaseAddress = new Uri("http://bank.test/") })));
+
+        await using (var scope = host.Services.CreateAsyncScope())
+            (await scope.ServiceProvider.GetRequiredService<ReconciliationRunner>().RunAsync(date, Ct)).ShouldBe(RunOutcome.Failed);
+
+        // The parser's own line message (step 4), not the generic text of an unexpected failure.
+        var run = await RunRowAsync(host, date);
+        (run.Status, run.Error).ShouldBe(("Failed",
+            "Settlement file line 1: expected the header 'record_type,bank_id,reference,amount_minor,currency,occurred_at'."));
+        (await OutboxAsync(host)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Bank_error_status_marks_run_Failed()
+    {
+        var date = new DateOnly(2026, 11, 18);
+        await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: RunSettings(), overrides: services =>
+            services.AddSingleton(new BankSettlementClient(new HttpClient(new BankAnswer(HttpStatusCode.InternalServerError, "secret body"))
+                { BaseAddress = new Uri("http://bank.test/") })));
+
+        await using (var scope = host.Services.CreateAsyncScope())
+            (await scope.ServiceProvider.GetRequiredService<ReconciliationRunner>().RunAsync(date, Ct)).ShouldBe(RunOutcome.Failed);
+
+        // The status code and nothing of the body.
+        var run = await RunRowAsync(host, date);
+        (run.Status, run.Error).ShouldBe(("Failed", "The bank answered the settlement request with status 500."));
         (await OutboxAsync(host)).ShouldBeEmpty();
     }
 
@@ -865,6 +984,39 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
             Task.FromResult(request.RequestUri!.AbsolutePath == "/settlements/" + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(csv, Encoding.UTF8, "text/csv") }
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
+    /// <summary>The injected clock, at a time the test sets; it moves on with real time from there.</summary>
+    private sealed class SettableClock(DateTimeOffset start) : IClock
+    {
+        private TimeSpan offset = start - DateTimeOffset.UtcNow;
+
+        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow + offset;
+        public void Set(DateTimeOffset at) => offset = at - DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>A bank that answers every request with one status and body.</summary>
+    private sealed class BankAnswer(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "text/csv") });
+    }
+
+    /// <summary>Fails the first completing save (the first save that adds outbox rows), as a database error would.</summary>
+    private sealed class FailFirstCompletion : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private int seen;
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var completing = eventData.Context?.ChangeTracker.Entries<Ledgerline.BuildingBlocks.Messaging.Outbox.OutboxMessage>()
+                .Any(entry => entry.State == EntityState.Added) == true;
+            if (completing && Interlocked.Increment(ref seen) == 1)
+                throw new InvalidOperationException("Injected failure of the completing save.");
+            return ValueTask.FromResult(result);
+        }
     }
 
     /// <summary>Holds the first command whose text contains the marker, before it is sent, until <see cref="Release"/>.</summary>
