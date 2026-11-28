@@ -52,7 +52,7 @@ ADR refers to it instead of repeating numbers.
 | Microsoft.AspNetCore.Mvc.Testing | 10.0.15 | MIT | In-process service hosts in tests |
 | Quartz | 4.7.3 | Apache-2.0 | Phase 2 reconciliation schedule |
 | MongoDB.Driver | 3.14.1 | Apache-2.0 | Phase 2 read model. Re-verified on nuget.org on 2026-11-28 (M5-T01): 3.14.1 is the latest stable, a patch above the 3.14.0 first recorded. Ships net6.0 and netstandard2.1 assets, no net10.0 target of its own; both run on net10.0 |
-| Confluent.Kafka | 2.16.0 | Apache-2.0 | Phase 2 event stream. Re-verified on nuget.org on 2026-11-28 (M5-T01): 2.16.0 is the latest stable, has a net10.0 asset, depends on librdkafka.redist 2.16.0 |
+| Confluent.Kafka | 2.16.0 | Apache-2.0 | Phase 2 event stream. Re-verified on nuget.org on 2026-11-28 (M5-T01): 2.16.0 is the latest stable, has a net10.0 asset, depends on librdkafka.redist 2.16.0. Producer settings checked against the package XML docs (M5-T02): `enable.idempotence=true` also sets `acks=all`, `max.in.flight<=5` and unbounded retries; `message.timeout.ms` (default 300000) is the local bound on one produce including retries, and `request.timeout.ms` is only enforced by the broker |
 
 Considered and not used:
 

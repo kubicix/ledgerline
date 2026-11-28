@@ -230,6 +230,7 @@ public sealed class OutboxRelayTests(InfrastructureFixture infrastructure)
     private sealed class ControlledPublisher(Func<OutboxMessage, int, bool> fails) : IOutboxPublisher
     {
         private readonly ConcurrentDictionary<Guid, int> attempts = new();
+        public string Transport => RabbitMqOutboxPublisher.TransportName;
         public ConcurrentQueue<long> Calls { get; } = new();
         public ConcurrentQueue<Guid> Successes { get; } = new();
         public Func<OutboxMessage, Task>? BeforePublish { get; set; }

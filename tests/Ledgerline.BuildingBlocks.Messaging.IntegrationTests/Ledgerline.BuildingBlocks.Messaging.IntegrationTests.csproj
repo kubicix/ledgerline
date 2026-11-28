@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging/Ledgerline.BuildingBlocks.Messaging.csproj" />
+    <ProjectReference Include="../../src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging.Kafka/Ledgerline.BuildingBlocks.Messaging.Kafka.csproj" />
     <ProjectReference Include="..\Ledgerline.Testing\Ledgerline.Testing.csproj" />
     <PackageReference Include="OpenTelemetry.Exporter.InMemory" />
     <PackageReference Include="Confluent.Kafka" />

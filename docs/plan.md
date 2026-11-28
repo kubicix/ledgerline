@@ -841,7 +841,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T02: Outbox transport column and Kafka publisher
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 2 (last paragraph); `building-blocks.md` section 6 (`transport`). **Depends:** M5-T01.
 **Files:** Create `src/BuildingBlocks/Ledgerline.BuildingBlocks.Messaging.Kafka/` project (so services without Kafka do not load librdkafka): `KafkaOutboxPublisher.cs`, `KafkaTopicMap.cs`, `KafkaMessagingExtensions.cs`. Modify Messaging: `IOutboxPublisher` gains `string Transport { get; }`; `OutboxRelay` runs one loop per registered publisher filtering by `transport`; `IOutbox.Enqueue` consults `IOutboxRouting` to decide which transports a type goes to and writes one row per transport. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/KafkaOutboxTests.cs`.

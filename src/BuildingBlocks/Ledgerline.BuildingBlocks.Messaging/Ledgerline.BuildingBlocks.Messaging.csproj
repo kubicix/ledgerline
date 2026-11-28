@@ -8,6 +8,10 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The Kafka transport package extends MessagingBuilder and reuses the trace context helper. -->
+    <InternalsVisibleTo Include="Ledgerline.BuildingBlocks.Messaging.Kafka" />
+  </ItemGroup>
 </Project>
 
 
