@@ -7,6 +7,8 @@ using Ledgerline.BuildingBlocks.Messaging.Consuming;
 using Ledgerline.BuildingBlocks.Messaging.RabbitMq;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
+using Ledgerline.Contracts.Reconciliation;
+using Ledgerline.Notifications.Features.Reconciliation;
 using Ledgerline.Notifications.Infrastructure;
 using Ledgerline.Notifications.Infrastructure.Entities;
 using Ledgerline.Notifications.Sending;
@@ -136,6 +138,80 @@ public sealed class NotificationFlowTests(InfrastructureFixture infrastructure)
     }
 
     [Fact]
+    public async Task Mismatch_event_emails_operations_address()
+    {
+        await using var scenario = await StartAsync(settings: OperationsAddress("operations@example.test"));
+        var run = Guid.NewGuid();
+        var payment = Guid.NewGuid();
+        await scenario.Probe.PublishAsync(new ReconciliationMismatchDetected(run, new DateOnly(2026, 11, 13), "BankCaptureNotInLedger",
+            payment.ToString(), 150000, null, "TRY"), run);
+        await WaitAsync(scenario.Host, rows => rows is [{ Status: "Sent" }]);
+        (await RowsAsync(scenario.Host)).Length.ShouldBe(1);
+        var sent = scenario.Sender.Sent.Single();
+        sent.RecipientEmail.ShouldBe("operations@example.test");
+        sent.RecipientOwnerId.ShouldBe(MismatchDetectedHandler.OperationsOwnerId);
+        sent.Template.ShouldBe("reconciliation-mismatch");
+        sent.PaymentId.ShouldBe(payment);
+        sent.Subject.ShouldBe("Reconciliation mismatch on 2026-11-13: BankCaptureNotInLedger");
+        sent.Body.ShouldContain("1,500.00 TRY");
+        sent.Body.ShouldContain(run.ToString());
+    }
+
+    [Fact]
+    public async Task Mismatch_event_twice_creates_one_notification()
+    {
+        await using var scenario = await StartAsync(settings: OperationsAddress("operations@example.test"));
+        var mismatch = new ReconciliationMismatchDetected(Guid.NewGuid(), new DateOnly(2026, 11, 13), "AmountMismatch", Guid.NewGuid().ToString(), 1001, 1000, "TRY");
+        var id = Guid.NewGuid();
+        await scenario.Probe.PublishAsync(mismatch, mismatch.RunId, id);
+        await WaitAsync(scenario.Host, rows => rows is [{ Status: "Sent" }]);
+        await scenario.Probe.PublishAsync(mismatch, mismatch.RunId, id);
+        await scenario.Probe.PublishAsync(mismatch, mismatch.RunId, id);
+        await Eventually.ShouldAsync(async () => (await RowsAsync(scenario.Host)).Length == 1);
+        scenario.Sender.Sent.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Mismatch_of_a_currency_reference_has_no_payment_and_renders_a_negative_amount()
+    {
+        await using var scenario = await StartAsync(settings: OperationsAddress("operations@example.test"));
+        var run = Guid.NewGuid();
+        await scenario.Probe.PublishAsync(new ReconciliationMismatchDetected(run, new DateOnly(2026, 11, 13), "LedgerImbalance", "TRY", null, -50, "TRY"), run);
+        await WaitAsync(scenario.Host, rows => rows is [{ Status: "Sent" }]);
+        var sent = scenario.Sender.Sent.Single();
+        sent.PaymentId.ShouldBeNull();
+        sent.Body.ShouldContain("Bank amount: none");
+        sent.Body.ShouldContain("Ledger amount: -0.50 TRY");
+    }
+
+    [Fact]
+    public async Task Mismatch_event_without_operations_address_is_retried_then_stored_as_Skipped()
+    {
+        await using var scenario = await StartAsync();
+        var run = Guid.NewGuid();
+        await scenario.Probe.PublishAsync(new ReconciliationMismatchDetected(run, new DateOnly(2026, 11, 13), "AmountMismatch",
+            Guid.NewGuid().ToString(), 1001, 1000, "TRY"), run);
+        await WaitAsync(scenario.Host, rows => rows is [{ Status: "Skipped", Reason: "RecipientUnknown", Template: "reconciliation-mismatch" }]);
+        scenario.Sender.Sent.ShouldBeEmpty();
+        await using var scope = scenario.Host.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
+        (await db.Set<Ledgerline.BuildingBlocks.Messaging.Inbox.InboxMessage>().CountAsync(TestContext.Current.CancellationToken)).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Operations_address_never_appears_in_logs()
+    {
+        var logs = new LogCapture();
+        await using var scenario = await StartAsync(fail: true, settings: OperationsAddress("operations@example.test"),
+            extra: services => services.AddLogging(builder => builder.AddProvider(logs)));
+        var run = Guid.NewGuid();
+        await scenario.Probe.PublishAsync(new ReconciliationMismatchDetected(run, new DateOnly(2026, 11, 13), "AmountMismatch",
+            Guid.NewGuid().ToString(), 1001, 1000, "TRY"), run);
+        await WaitAsync(scenario.Host, rows => rows is [{ Status: "Failed" }]);
+        string.Join('\n', logs.Messages).ShouldNotContain("@example.test");
+    }
+
+    [Fact]
     public async Task Notification_service_uses_inbox_without_outbox()
     {
         await using var scenario = await StartAsync();
@@ -144,7 +220,8 @@ public sealed class NotificationFlowTests(InfrastructureFixture infrastructure)
         db.Model.FindEntityType(typeof(Ledgerline.BuildingBlocks.Messaging.Outbox.OutboxMessage)).ShouldBeNull();
     }
 
-    private async Task<Scenario> StartAsync(bool fail = false, Action<IServiceCollection>? extra = null)
+    private async Task<Scenario> StartAsync(bool fail = false, Action<IServiceCollection>? extra = null,
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         var sender = new RecordingSender(fail);
         var host = await ServiceHost<Program>.StartAsync(infrastructure, "notifications", services =>
@@ -153,7 +230,7 @@ public sealed class NotificationFlowTests(InfrastructureFixture infrastructure)
             services.AddSingleton(new SenderOptions { PollIntervalMs = 10, BackoffUnit = TimeSpan.FromMilliseconds(10) });
             services.AddSingleton(new ConsumerOptions { Service = "notifications", RetryTtlMs = 25, MaxAttempts = 3 });
             extra?.Invoke(services);
-        });
+        }, settings);
         var probe = await BrokerProbe.CreateAsync(host.Services.GetRequiredService<RabbitMqOptions>().Uri, "payments.event.#");
         var owner = Guid.NewGuid();
         var account = Guid.NewGuid();
@@ -166,6 +243,7 @@ public sealed class NotificationFlowTests(InfrastructureFixture infrastructure)
         return new(host, probe, sender, owner, account);
     }
 
+    private static Dictionary<string, string?> OperationsAddress(string address) => new() { ["Notifications:OperationsEmail"] = address };
     private static PaymentCompleted Completed(Guid account, Guid owner) => new(Guid.NewGuid(), "TopUp", owner, 150000, "TRY", null, account, DateTimeOffset.UtcNow, "capture");
     private static async Task<Notification[]> RowsAsync(ServiceHost<Program> host)
     {

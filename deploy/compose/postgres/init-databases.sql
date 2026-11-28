@@ -15,4 +15,7 @@ CREATE DATABASE notifications_db OWNER notifications;
 CREATE USER banksim WITH PASSWORD 'banksim_dev';
 CREATE DATABASE banksim_db OWNER banksim;
 
-REVOKE CONNECT ON DATABASE accounts_db, payments_db, risk_db, notifications_db, banksim_db FROM PUBLIC;
+CREATE USER reconciliation WITH PASSWORD 'reconciliation_dev';
+CREATE DATABASE reconciliation_db OWNER reconciliation;
+
+REVOKE CONNECT ON DATABASE accounts_db, payments_db, risk_db, notifications_db, banksim_db, reconciliation_db FROM PUBLIC;

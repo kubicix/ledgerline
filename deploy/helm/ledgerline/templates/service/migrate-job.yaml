@@ -7,7 +7,7 @@ connections. All Jobs share one hook weight; Helm then runs them one after anoth
 */ -}}
 {{- if not .Values.infraOnly }}
 {{- $wait := .Values.migrations.waitForDatabase }}
-{{- range $name, $svc := .Values.services }}
+{{- range $name, $svc := include "ledgerline.services" . | fromYaml }}
 {{- if $svc.migrate }}
 {{- $job := printf "%s-migrate" $name }}
 ---

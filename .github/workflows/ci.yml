@@ -40,7 +40,9 @@ jobs:
         with:
           version: v4.3.2
       - name: Validate Compose file
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 config --quiet
       - name: Helm chart render tests
         run: ./deploy/helm/ledgerline/tests/render_test.sh
 
@@ -86,7 +88,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build service images
         id: build
-        run: docker compose --profile app build
+        run: docker compose --profile app --profile phase2 build
       - name: Trivy ledgerline-accounts
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
@@ -141,6 +143,24 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
+      - name: Trivy ledgerline-reporting
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-reporting:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Trivy ledgerline-reconciliation
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: v0.70.0
+          image-ref: ledgerline-reconciliation:local
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
 
   system-tests:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule'
@@ -160,7 +180,10 @@ jobs:
         run: dotnet test --project tests/Ledgerline.SystemTests
       - name: Collect container logs
         if: failure() || cancelled()
-        run: docker compose -p ledgerline-systest --profile app logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+        # Both stack shapes; the harness brings a kept stack down before the other starts and writes its logs first.
+        run: |
+          docker compose -p ledgerline-systest --profile app logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+          docker compose -p ledgerline-systest-phase2 -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 logs --no-color --timestamps > compose-logs-phase2.txt 2>&1 || true
       - name: Upload container logs
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
@@ -168,6 +191,7 @@ jobs:
           name: system-tests-compose-logs
           path: |
             compose-logs.txt
+            compose-logs-phase2.txt
             tests/Ledgerline.SystemTests/bin/**/compose-logs/
           if-no-files-found: ignore
 

@@ -121,6 +121,13 @@ public sealed class LedgerlineClient(HttpClient http, KeycloakTokens tokens) : I
         return await ReadAsync<T>(response, "GET " + path, ct);
     }
 
+    /// <summary>Like <see cref="GetAsync{T}"/>, but a 404 answer gives null: for a read model or a run that does not exist yet.</summary>
+    public async Task<T?> FindAsync<T>(string user, string path, CancellationToken ct = default) where T : class
+    {
+        using var response = await SendWithRetryAsync(user, () => new HttpRequestMessage(HttpMethod.Get, path), retryNotFound: false, ct);
+        return response.StatusCode == HttpStatusCode.NotFound ? null : await ReadAsync<T>(response, "GET " + path, ct);
+    }
+
     public async Task<T> PostAsync<T>(string user, string path, object body, string idempotencyKey, CancellationToken ct = default)
     {
         using var response = await SendWithRetryAsync(user, () =>

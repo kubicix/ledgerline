@@ -1,7 +1,12 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Ledgerline.Testing;
+
+// The two stack shapes publish the same host ports, so only one Compose project may be up at a time: the collections run
+// one after another, never in parallel.
+[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
 
 namespace Ledgerline.SystemTests.Harness;
 
@@ -11,10 +16,50 @@ public sealed class ComposeTests : ICollectionFixture<ComposeStack>
     public const string Name = "Compose stack";
 }
 
+[CollectionDefinition(Name)]
+public sealed class Phase2ComposeTests : ICollectionFixture<Phase2ComposeStack>
+{
+    public const string Name = "Phase 2 Compose stack";
+}
+
 /// <summary>
-/// Drives the real Docker Compose stack (project <c>ledgerline-systest</c>, profile <c>app</c>).
-/// Construction does nothing; the stack starts on the first <see cref="UpAsync"/> and goes down
-/// (volumes kept) when the collection ends, unless LEDGERLINE_SYSTEM_TESTS_KEEP=1.
+/// One shape of the Compose stack: its project name, the Compose files (none means Compose's own default, compose.yaml)
+/// and the profiles. Each shape has its own project and therefore its own volumes.
+/// </summary>
+public sealed record StackShape(string ProjectName, IReadOnlyList<string> Files, IReadOnlyList<string> Profiles)
+{
+    /// <summary>The M1 to M4 system: compose.yaml with profile <c>app</c>, project <c>ledgerline-systest</c>.</summary>
+    public static StackShape Default { get; } = new(ComposeStack.ProjectName, [], ["app"]);
+
+    /// <summary>
+    /// Phase 2: compose.yaml plus compose.phase2.yaml with profiles <c>app</c> and <c>phase2</c>, project
+    /// <c>ledgerline-systest-phase2</c>. A completed reconciliation day cannot be run again, so on the kept volumes of one
+    /// project the Phase 2 reconciliation test passes once per UTC day. To rerun it the same day, set
+    /// LEDGERLINE_SYSTEM_TESTS_PHASE2_PROJECT to a fresh project name (new volumes; the old ones are kept).
+    /// </summary>
+    public static StackShape Phase2 { get; } = new(
+        Environment.GetEnvironmentVariable("LEDGERLINE_SYSTEM_TESTS_PHASE2_PROJECT") ?? ComposeStack.ProjectName + "-phase2",
+        ["compose.yaml", "compose.phase2.yaml"], ["app", "phase2"]);
+
+    /// <summary>The arguments that select this shape: <c>compose -p name [-f file]... --profile p...</c>.</summary>
+    public IReadOnlyList<string> ComposeArguments =>
+        ["compose", "-p", ProjectName, .. Files.SelectMany(file => new[] { "-f", file }), .. Profiles.SelectMany(profile => new[] { "--profile", profile })];
+}
+
+/// <summary>The collection fixture of <see cref="Phase2ComposeTests"/>: a <see cref="ComposeStack"/> of <see cref="StackShape.Phase2"/>.</summary>
+[SuppressMessage("Naming", "CA1711", Justification = "A Docker Compose stack, not a Stack<T>, named like ComposeStack.")]
+public sealed class Phase2ComposeStack : IAsyncDisposable
+{
+    public ComposeStack Stack { get; } = new(StackShape.Phase2);
+
+    public ValueTask DisposeAsync() => Stack.DisposeAsync();
+}
+
+/// <summary>
+/// Drives the real Docker Compose stack of one <see cref="StackShape"/> (by default project <c>ledgerline-systest</c>,
+/// profile <c>app</c>). Construction does nothing; the stack starts on the first <see cref="UpAsync"/> and goes down
+/// (volumes kept) when the collection ends, unless LEDGERLINE_SYSTEM_TESTS_KEEP=1. A kept stack of the other shape that
+/// this test process started is brought down (volumes kept, logs written first) before this one starts.
 /// </summary>
 [SuppressMessage("Naming", "CA1711", Justification = "Name fixed by the plan; a Docker Compose stack, not a Stack<T>.")]
 public sealed class ComposeStack : IAsyncDisposable
@@ -23,6 +68,8 @@ public sealed class ComposeStack : IAsyncDisposable
     public const string SkipReason = "System tests run only when LEDGERLINE_SYSTEM_TESTS=1.";
     private static readonly TimeSpan UpTimeout = TimeSpan.FromMinutes(20);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(3);
+    // Stacks this test process brought up, by project name, so one shape can take down a kept stack of the other.
+    private static readonly ConcurrentDictionary<string, ComposeStack> StartedStacks = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim gate = new(1, 1);
     private bool attempted; // An up ran in this session: logs are worth collecting and down is ours to run.
     private bool built;     // An up with --build succeeded in this session.
@@ -33,6 +80,15 @@ public sealed class ComposeStack : IAsyncDisposable
     public static bool Enabled => Environment.GetEnvironmentVariable("LEDGERLINE_SYSTEM_TESTS") == "1";
 
     public static bool KeepRunning => Environment.GetEnvironmentVariable("LEDGERLINE_SYSTEM_TESTS_KEEP") == "1";
+
+    /// <summary>The collection fixture of <see cref="ComposeTests"/>: <see cref="StackShape.Default"/>.</summary>
+    public ComposeStack() : this(StackShape.Default)
+    {
+    }
+
+    internal ComposeStack(StackShape shape) => Shape = shape;
+
+    public StackShape Shape { get; }
 
     public string RepositoryRoot { get; } = FindRepositoryRoot();
 
@@ -50,6 +106,7 @@ public sealed class ComposeStack : IAsyncDisposable
         {
             await EnsureNoOtherLedgerlineProjectAsync(ct);
             attempted = true;
+            StartedStacks[Shape.ProjectName] = this;
             string[] arguments = built
                 ? ["up", "-d", "--wait", "--wait-timeout", Seconds(UpTimeout)]
                 : ["up", "-d", "--build", "--wait", "--wait-timeout", Seconds(UpTimeout)];
@@ -172,14 +229,33 @@ public sealed class ComposeStack : IAsyncDisposable
                 TestContext.Current.SendDiagnosticMessage($"Restoring the Risk velocity rule failed: {error.Message}");
             }
         }
-        if (attempted && !KeepRunning)
-        {
-            var down = await ComposeAsync(["down"], CommandTimeout, CancellationToken.None);
-            if (down.ExitCode != 0) // Teardown must not fail the session; leave a trace instead.
-                TestContext.Current.SendDiagnosticMessage($"docker compose -p {ProjectName} down failed with exit code {down.ExitCode}: {Tail(down.Output)}");
-        }
+        if (attempted && !KeepRunning) _ = await DownAsync();
         gate.Dispose();
         velocityGate.Dispose();
+    }
+
+    /// <summary><c>down</c> without <c>-v</c>; volumes are kept. A failure leaves a trace and returns false instead of throwing.</summary>
+    private async Task<bool> DownAsync()
+    {
+        var down = await ComposeAsync(["down"], CommandTimeout, CancellationToken.None);
+        if (down.ExitCode != 0) // Teardown must not fail the session; leave a trace instead.
+        {
+            TestContext.Current.SendDiagnosticMessage($"docker compose -p {Shape.ProjectName} down failed with exit code {down.ExitCode}: {Tail(down.Output)}");
+            return false;
+        }
+        StartedStacks.TryRemove(new KeyValuePair<string, ComposeStack>(Shape.ProjectName, this));
+        return true;
+    }
+
+    /// <summary>
+    /// Brings down a stack of another shape that this process started and kept (LEDGERLINE_SYSTEM_TESTS_KEEP=1), so its
+    /// host ports are free; its collection has ended. Its logs are written first, since a kept stack exists to keep them.
+    /// </summary>
+    private async Task<bool> MakeWayAsync()
+    {
+        var path = await CollectLogsAsync(Shape.ProjectName + "-kept");
+        TestContext.Current.SendDiagnosticMessage($"Bringing down kept project {Shape.ProjectName} before the next stack; its logs are in {path}");
+        return await DownAsync();
     }
 
     private async Task RunCheckedAsync(IReadOnlyList<string> arguments, CancellationToken ct)
@@ -190,16 +266,20 @@ public sealed class ComposeStack : IAsyncDisposable
     }
 
     private Task<CommandResult> ComposeAsync(IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken ct) =>
-        RunAsync("docker", ["compose", "-p", ProjectName, "--profile", "app", .. arguments], timeout, ct);
+        RunAsync("docker", [.. Shape.ComposeArguments, .. arguments], timeout, ct);
 
     private async Task EnsureNoOtherLedgerlineProjectAsync(CancellationToken ct)
     {
         var result = await RunAsync("docker", ["ps", "--format", "{{.Label \"com.docker.compose.project\"}}"], CommandTimeout, ct);
         if (result.ExitCode != 0) throw new InvalidOperationException($"docker ps failed: {Tail(result.Output)}");
-        var others = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(project => project.StartsWith("ledgerline", StringComparison.OrdinalIgnoreCase) && project != ProjectName)
+        var running = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(project => project.StartsWith("ledgerline", StringComparison.OrdinalIgnoreCase) && project != Shape.ProjectName)
             .Distinct(StringComparer.Ordinal).ToArray();
-        if (others.Length != 0)
+        // Only stacks this process started are brought down; any other Ledgerline project stops the run as before.
+        var others = new List<string>();
+        foreach (var project in running)
+            if (!StartedStacks.TryGetValue(project, out var kept) || !await kept.MakeWayAsync()) others.Add(project);
+        if (others.Count != 0)
             throw new InvalidOperationException(
                 $"Another Ledgerline Compose project is running ({string.Join(", ", others)}). It publishes the same host ports. " +
                 $"Bring it down first (docker compose -p <name> --profile app down, without -v); the system tests do not stop it.");

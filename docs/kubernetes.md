@@ -141,9 +141,12 @@ prints nothing; if `helm list` itself fails, for example because the cluster is 
 
 The second pass has one more hook Job, `rabbitmq-definitions`, which runs first (hook weight -1). It is the Compose
 `rabbitmq-init` job: it imports `deploy/compose/rabbitmq/local-events.json` with `rabbitmqadmin`. That file binds the
-`local.events` queue to `accounts.event.journal-entry-posted.v1`, the only queue bound to that event. Without it the
+`local.events` queue to `accounts.event.journal-entry-posted.v1`, the only queue bound to that event, and to
+`reconciliation.event.reconciliation-completed.v1` on the `ledgerline.reconciliation` exchange. Without it the
 Accounts outbox relay cannot route the event, retries it and holds back every later Accounts message, so payment
-sagas stop at the ledger step. The import is idempotent and runs again on every upgrade.
+sagas stop at the ledger step (and, with Phase 2, the Reconciliation outbox stops at its completion event). With
+`infra.rabbitmq.enabled=false` the external broker must provide the same exchanges, queue and bindings, including
+the reconciliation one. The import is idempotent and runs again on every upgrade.
 
 `--reset-values` matters: on an upgrade without `--set` or `-f`, Helm reuses the values of the last release, so the
 second pass would keep `infraOnly=true` and install no services. With the flag the release values are always the
@@ -158,6 +161,39 @@ The smoke scripts use fixed idempotency keys. On a cluster that already ran them
 that passes as long as the Mailpit pod keeps its mail. After `helm uninstall` Mailpit starts empty (its data is not on
 a volume), so the replayed operations send no new mail and the email check fails. After an uninstall or an
 interrupted smoke run, prove the flow on a freshly created cluster: `./scripts/kind-down.sh && ./scripts/kind-up.sh`.
+
+### Phase 2 (`phase2.enabled`)
+
+`phase2.enabled` (default `false`) adds the M5 Phase 2 parts, the Helm twin of Compose profile `phase2` with
+`compose.phase2.yaml`: Kafka (single-node KRaft StatefulSet, `apache/kafka:4.4.0`) and MongoDB (StatefulSet, `mongo:9.0`),
+both ClusterIP only; a `kafka-topics` hook Job that creates the topics as the Compose `kafka-init` job does; the
+`reporting` and `reconciliation` services (Reconciliation with its migration Job); Kafka publishing in Accounts and
+Payments; and the operations address in Notifications. No NodePort and no kind port mapping is added: Reporting and
+Reconciliation are reached through the gateway under `/api/reporting/...` and `/api/reconciliation/...`. With the value
+off the chart renders exactly the default release, and those two routes answer `503`.
+
+Deploy it as a first install, on a new cluster or after `helm uninstall`. The second works only when the PostgreSQL
+PVC was created by this chart version, because PVCs survive an uninstall: Phase 2 needs a data directory initialised
+by this version of `init-databases.sql`, which runs only on an empty one and creates the `reconciliation` login and
+database. With an older PVC, use a fresh cluster, or create the role and database once by hand
+(`CREATE USER reconciliation WITH PASSWORD 'reconciliation_dev'; CREATE DATABASE reconciliation_db OWNER reconciliation;`).
+
+```bash
+./scripts/kind-down.sh && ./scripts/kind-up.sh
+./scripts/kind-deploy.sh --set phase2.enabled=true
+```
+
+`kind-deploy` builds and loads the Reporting and Reconciliation images too when the arguments contain
+`phase2.enabled=true`, and passes the value to both passes. `kind-deploy.sh` and `kind-deploy.ps1` detect Phase 2 only
+from `--set phase2.enabled=true` among their arguments, not from a `-f` values file, so pass it with `--set`;
+otherwise the two Phase 2 images are not built and loaded. Pass 1 (`infraOnly=true`) then also installs Kafka, MongoDB
+and the `reconciliation-secrets` Secret, so the pass 2 hooks (`kafka-topics`, `reconciliation-migrate`) find them.
+
+Switching Phase 2 on by upgrading a running default release is not supported. That upgrade's `pre-upgrade` hooks run
+before any regular resource of the same upgrade is created, so `kafka-topics` would wait for a Kafka that does not exist
+yet and `reconciliation-migrate` for a Secret that does not exist yet, and the upgrade times out. Uninstall and deploy
+again (`helm --kube-context kind-ledgerline uninstall ledgerline`, then the `kind-deploy` above), or start from a new
+cluster.
 
 ### Keycloak and the token issuer
 

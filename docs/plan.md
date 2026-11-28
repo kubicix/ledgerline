@@ -893,7 +893,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T07: Reconciliation: matching engine (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` section 3 steps 5 and 6. **Depends:** none.
 **Files:** Create `src/Services/Reconciliation/Ledgerline.Reconciliation/` (web project; add to solution and to `Deployables`): `Matching/{BankRecord.cs,StagedPayment.cs,StagedLedgerLine.cs,Mismatch.cs,MismatchCode.cs,ReconciliationResult.cs,Matcher.cs,SettlementFileParser.cs}`; `tests/Ledgerline.Reconciliation.Tests/` with `MatcherTests.cs`, `SettlementFileParserTests.cs`.
@@ -904,7 +904,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T08: Reconciliation: staging consumers and schema
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` sections 2, 6. **Depends:** M5-T03, M5-T07.
 **Files:** In Reconciliation: `Infrastructure/{ReconciliationDbContext.cs,Entities/*.cs,Migrations/Initial,MigrateCommand.cs}` (Quartz tables through the SQL script shipped with `Quartz.Serialization.SystemTextJson` and the PostgreSQL job store package; verify package names on nuget.org), `Staging/{PaymentStagingConsumer.cs,LedgerStagingConsumer.cs}` (reuse the consumer loop pattern from Reporting by copying the small class; do not create a shared Kafka consumer library for two users); `deploy/compose/postgres/init-databases.sql` gains `reconciliation` login and database. `tests/Ledgerline.Reconciliation.IntegrationTests/StagingTests.cs`.
@@ -914,7 +914,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T09: Reconciliation: job, lock, run lifecycle, events
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` sections 3, 4, 7, 8; ADR 0010. **Depends:** M5-T08, M2-T07.
 **Files:** `Runs/{DailyReconciliationJob.cs,ReconciliationRunner.cs,BankSettlementClient.cs,RunLock.cs}`, contracts `Reconciliation/{ReconciliationCompleted.cs,PaymentsReconciled.cs,ReconciliationMismatchDetected.cs}` with samples, `Program.cs` (Quartz clustered ADO.NET store, messaging with outbox only). Add `Quartz`, `Quartz.Extensions.Hosting` 4.7.3. Test `RunTests.cs` (Bank Simulator in-process; Kafka records produced by the test).
@@ -924,7 +924,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T10: Reconciliation API and downstream consumers
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` section 5; `payments.md` section 5 (reconciled); `notifications.md` section 2 (mismatch row). **Depends:** M5-T09.
 **Files:** Reconciliation `Features/{StartRunEndpoint.cs,ListRunsEndpoint.cs,GetRunEndpoint.cs,ListItemsEndpoint.cs}`; Payments `Features/Reconciliation/PaymentsReconciledHandler.cs`; Notifications `Features/Reconciliation/MismatchDetectedHandler.cs`, template `reconciliation-mismatch`, option `Notifications:OperationsEmail`. Tests in each service's integration project: `ReconciliationApiTests.cs`, `ReconciledTests.cs`, extend `NotificationFlowTests.cs`.
@@ -934,7 +934,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T11: Phase 2 deployment, system test, README
 
-- [ ] Done
+- [x] Done
 
 **Depends:** M5-T06, M5-T10.
 **Files:** Dockerfiles for Reporting and Reconciliation; `compose.yaml` (profile `phase2`: both services with migrate job for Reconciliation, `Messaging__Kafka__Enabled=true` for Accounts and Payments when the profile is active through an override file `compose.phase2.yaml` or environment interpolation; choose the override file); Gateway `appsettings.json` (two Phase 2 routes); Helm `values.yaml` (`phase2.enabled`, Kafka and MongoDB infra templates, two services); `tests/Ledgerline.SystemTests/Phase2SystemTests.cs`; `README.md` (Phase 2 section, CQRS note from `reporting.md` section 8).
@@ -946,9 +946,9 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 - [x] Kafka event stream fed through the outbox, outage isolated from RabbitMQ (M5-T02, M5-T03).
 - [x] MongoDB read model with idempotent projections and a proven rebuild (M5-T04 to M5-T06).
-- [ ] End-of-day reconciliation with a three-way match and every mismatch code tested (M5-T07 to M5-T10).
-- [ ] One command still starts everything, now with the Phase 2 profile (M5-T11). **DoD: one command**
-- [ ] ADR 0010 matches the code; ADR 0000 Phase 2 rows re-verified. **DoD: ADRs written**
+- [x] End-of-day reconciliation with a three-way match and every mismatch code tested (M5-T07 to M5-T10).
+- [x] One command still starts everything, now with the Phase 2 profile (M5-T11). **DoD: one command**
+- [x] ADR 0010 matches the code; ADR 0000 Phase 2 rows re-verified. **DoD: ADRs written**
 
 ---
 

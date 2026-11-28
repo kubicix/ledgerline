@@ -3,8 +3,10 @@ RabbitMQ (compose.yaml: rabbitmq). A StatefulSet with a PVC: the node name deriv
 so the quorum queues find their data again after a restart. The services declare their own exchanges and queues at
 startup (BuildingBlocks Topology). The rabbitmq-definitions Job below is the Compose rabbitmq-init job: it imports
 files/local-events.json (a copy of deploy/compose/rabbitmq/local-events.json), whose local.events queue is the only
-binding for accounts.event.journal-entry-posted.v1. Without it the Accounts relay publishes that event unroutable,
-retries it and holds back every later Accounts message. The Job is a pre-install,pre-upgrade hook with a weight below
+binding for accounts.event.journal-entry-posted.v1 and also binds
+reconciliation.event.reconciliation-completed.v1 on ledgerline.reconciliation. Without it the Accounts relay publishes
+that event unroutable, retries it and holds back every later Accounts message, and the Reconciliation outbox stops at
+its completion event (mandatory publish, NO_ROUTE). The Job is a pre-install,pre-upgrade hook with a weight below
 the migration Jobs, so it runs before any service of the upgrade starts; like them it reads only what the
 infrastructure-only pass also renders (rabbitmq-secrets and the rabbitmq-definitions ConfigMap). Importing the file at
 node boot instead (definitions.local.path) would skip creating the default user.

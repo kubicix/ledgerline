@@ -22,13 +22,14 @@ communicate through RabbitMQ with a transactional outbox and inbox.
 | M2 | Sagas with compensation, Risk, Notifications, gateway, auth | Implemented, reviewed, 505 tests passing; [integration record](https://github.com/kubicix/ledgerline/pull/2) |
 | M3 | Failure-scenario tests, k6, OpenTelemetry dashboards, CI security scans | Implemented, reviewed and merged to `main` ([integration record](https://github.com/kubicix/ledgerline/pull/3)) |
 | M4 | Kubernetes with Helm and health checks | Implemented and reviewed; the cluster deploy, smoke flow and pod-deletion and rolling-restart resilience checks were verified on a local kind cluster |
-| M5 | Kafka event stream, MongoDB read model, reconciliation job | Not started |
+| M5 | Kafka event stream, MongoDB read model, reconciliation job | Implemented; Phase 2 runs on Compose (profile `phase2` with `compose.phase2.yaml`) and on kind (`phase2.enabled`), verified locally by its system tests and a fresh kind install |
 | M6 | Blazor UI | Not started |
 
 Accounts, Payments, Risk, Notifications, BankSimulator and Gateway run together.
 Redis supports idempotency and Risk velocity windows; Keycloak issues JWTs.
-Telemetry dashboards, Kubernetes, reporting, reconciliation and the UI belong to
-later milestones. See [progress and agent handoff](docs/progress.md).
+Reporting and Reconciliation run with Phase 2 switched on (see
+[Phase 2](#phase-2-event-stream-read-model-reconciliation)); the UI belongs to a later
+milestone. See [progress and agent handoff](docs/progress.md).
 
 ## Quick start
 
@@ -113,7 +114,8 @@ flowchart LR
 ```
 
 The Compose `rabbitmq-init` job declares `local.events`, a durable quorum queue
-bound to journal-entry-posted, payment-completed and payment-failed events. It retains
+bound to journal-entry-posted, payment-completed and payment-failed events, and to
+`reconciliation.event.reconciliation-completed.v1` on the `ledgerline.reconciliation` exchange. It retains
 events whose business consumers arrive in later milestones, so mandatory publication
 can complete. It does not
 consume commands or replay events to future services. The queue retains local demo
@@ -286,7 +288,59 @@ and the resilience checks are in [docs/kubernetes.md](docs/kubernetes.md).
 
 ## Phase 2: event stream, read model, reconciliation
 
-_Placeholder: filled in M5-T11._
+Phase 2 is additive and off by default: `docker compose --profile app up` and a plain `kind-deploy` start the system
+above without Kafka, MongoDB, Reporting or Reconciliation.
+
+- **Kafka is the replayable history, not a second bus.** With Phase 2 on, Accounts and Payments also publish their
+  events to Kafka through the same transactional outbox (a second transport, `Messaging:Kafka:Enabled`). Commands and
+  saga replies stay on RabbitMQ. Topics keep every record (`retention.ms=-1`).
+- **Reporting** projects the stream into MongoDB read models: account statements, payment timelines and merchant daily
+  totals, served under `/api/reporting/...` ([spec](docs/specs/reporting.md)). This is CQRS: writes stay in each
+  service's PostgreSQL, reads that span time ranges come from documents shaped for the query. The cost is eventual
+  consistency (a statement can be seconds behind) and a second datastore. For this data volume a PostgreSQL view would
+  do the same job; the read model exists to demonstrate the pattern.
+- **Deduplication window of the daily totals.** Counters cannot be upserted by replacement, so each merchant-day
+  document remembers the IDs of the messages it applied, capped to the last 1 000 (`appliedMessageIds`). A redelivery
+  older than that window would be counted twice. Kafka redelivery windows are far shorter, so the cap is a stated
+  trade-off of bounded document size against an unbounded ID list.
+- **Reconciliation** compares, once per day, three independent records of external money movement for the previous
+  UTC day: the bank's settlement file, the completed and compensated top-ups of Payments, and the ledger lines on the
+  bank clearing account ([spec](docs/specs/reconciliation.md)). It stages both Kafka topics in its own PostgreSQL
+  database, runs as a Quartz.NET job at 00:30 UTC (clustered job store, a Redis lock and a unique business date against
+  a double run), records mismatches and publishes the result on RabbitMQ: Payments stamps the matched payments, and
+  Notifications mails each mismatch to the operations address. It never corrects anything; corrections are a human
+  decision. Admins can start a run with `POST /api/reconciliation/runs`. A Kubernetes CronJob would be a valid
+  production alternative to Quartz; Quartz was chosen because it runs the same under Compose and inside the code the
+  tests reach ([ADR 0010](docs/adr/0010-scheduler.md)).
+
+Start Phase 2 on Compose:
+
+```bash
+docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 up --build -d --wait
+./scripts/smoke.sh
+docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 down
+```
+
+`compose.phase2.yaml` turns Kafka publishing on for Accounts and Payments and sets the operations address
+(`operations@ledgerline.test`, visible in Mailpit). On kind, deploy Phase 2 on a fresh cluster:
+
+```bash
+./scripts/kind-up.sh
+./scripts/kind-deploy.sh --set phase2.enabled=true
+```
+
+Switching Phase 2 on by upgrading a running default release is not supported; [docs/kubernetes.md](docs/kubernetes.md)
+explains why. Phase 2 also needs a PostgreSQL data directory initialised by this version of
+`deploy/compose/postgres/init-databases.sql`, which runs only on an empty data directory and creates the
+`reconciliation` login and database. With an older volume, use a fresh Compose project
+(`docker compose -p <new-name> ...`) or a fresh kind cluster (`./scripts/kind-down.sh && ./scripts/kind-up.sh`), or
+create the role and database once by hand:
+`CREATE USER reconciliation WITH PASSWORD 'reconciliation_dev'; CREATE DATABASE reconciliation_db OWNER reconciliation;`. The system tests `Read_model_catches_up_and_matches_ledger_after_workload` and
+`Reconciliation_of_today_is_clean_after_workload_and_flags_a_tampered_row`
+([Phase2SystemTests.cs](tests/Ledgerline.SystemTests/Phase2SystemTests.cs)) run on their own Compose project with this
+stack shape: the first checks that every statement catches up with the ledger balance after a workload, the second
+drops one capture from today's settlement file and checks that the run flags exactly that top-up, stamps the others
+as reconciled and mails the mismatch.
 
 ## Demo UI
 
@@ -303,7 +357,7 @@ The `security` and `images` jobs in [ci.yml](.github/workflows/ci.yml) and the
 | Vulnerable NuGet packages (`dotnet list package --vulnerable --include-transitive`) | Direct and transitive packages of the whole solution; any hit fails the job | Push to `main`, pull requests, nightly |
 | Secret scan (gitleaks, [.gitleaks.toml](.gitleaks.toml)) | Committed secrets: the pull request's commits on pull requests, the pushed commits on push, the full git history on the nightly run | Push to `main`, pull requests, nightly |
 | Static analysis (CodeQL, C#) | Code-level vulnerabilities in the source, using a manual build | Push to `main`, pull requests |
-| Image scan (Trivy) | Fixed HIGH and CRITICAL vulnerabilities in the six service images | Push to `main` |
+| Image scan (Trivy) | Fixed HIGH and CRITICAL vulnerabilities in the eight service images | Push to `main` |
 
 On a private repository, dependency review and the CodeQL result upload need GitHub
 Advanced Security. The scans are meant to run unchanged once the repository is public.

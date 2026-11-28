@@ -29,6 +29,13 @@ public sealed class BankSimulatorClient(ComposeStack stack)
 
     public Task ClearFaultAsync(CancellationToken ct = default) => SendAsync("DELETE", "/faults", null, ct);
 
+    /// <summary>
+    /// Leaves the capture <paramref name="captureId"/> out of the settlement file of <paramref name="date"/>
+    /// (<c>PUT /settlement-tampering</c>). Held in the simulator's memory; it replaces any earlier tampering of that date.
+    /// </summary>
+    public Task DropCaptureFromSettlementAsync(DateOnly date, string captureId, CancellationToken ct = default) =>
+        SendAsync("PUT", "/settlement-tampering", new { date, dropCaptureId = captureId }, ct);
+
     /// <summary>The settlement file of one UTC day: every successful capture and refund.</summary>
     public async Task<IReadOnlyList<SettlementRecord>> GetSettlementAsync(DateOnly date, CancellationToken ct = default)
     {

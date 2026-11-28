@@ -6,6 +6,14 @@
 # or migration Jobs). scripts/kind-deploy uses it for the first pass of a two-pass install (docs/kubernetes.md).
 infraOnly: false
 
+# Phase 2 (M5): Kafka, MongoDB, Reporting and Reconciliation, the Helm twin of compose.phase2.yaml with profile phase2.
+# Off by default; with it off the chart renders exactly the M1 to M4 system. With it on, the services marked phase2: true
+# are rendered, every service's phase2Env is merged over its env (Kafka publishing in Accounts and Payments, the operations
+# address in Notifications), and infra.kafka, infra.mongo and the kafka-topics hook Job are rendered. Turn it on with a
+# fresh install, not an upgrade of a running default release (docs/kubernetes.md, "Phase 2").
+phase2:
+  enabled: false
+
 global:
   imagePullPolicy: IfNotPresent   # images are tagged :local and loaded into the cluster with kind load
   runAsUser: 1654                 # APP_UID of the Microsoft aspnet runtime images
@@ -28,6 +36,8 @@ migrations:
 #   nodePort   set only on the service exposed outside the cluster (makes its Service a NodePort)
 #   env        plain settings, rendered into the <service>-config ConfigMap
 #   secretEnv  settings with credentials, rendered into the <service>-secrets Secret
+#   phase2     true for a Phase 2 service, rendered only with phase2.enabled
+#   phase2Env  settings merged over env only with phase2.enabled (compose.phase2.yaml)
 services:
   accounts:
     image: ledgerline-accounts:local
@@ -42,6 +52,9 @@ services:
       Auth__RequireHttpsMetadata: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       ASPNETCORE_ENVIRONMENT: Development
+    phase2Env:
+      Messaging__Kafka__Enabled: "true"
+      Messaging__Kafka__BootstrapServers: kafka:9092
     secretEnv:
       ConnectionStrings__Database: Host=postgres;Database=accounts_db;Username=accounts;Password=accounts_dev;Maximum Pool Size=40
       Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
@@ -60,6 +73,9 @@ services:
       Auth__RequireHttpsMetadata: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       ASPNETCORE_ENVIRONMENT: Development
+    phase2Env:
+      Messaging__Kafka__Enabled: "true"
+      Messaging__Kafka__BootstrapServers: kafka:9092
     secretEnv:
       ConnectionStrings__Database: Host=postgres;Database=payments_db;Username=payments;Password=payments_dev;Maximum Pool Size=40
       Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
@@ -93,6 +109,8 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
       Smtp__Host: mailpit
       Smtp__Port: "1025"
+    phase2Env:
+      Notifications__OperationsEmail: operations@ledgerline.test
     secretEnv:
       ConnectionStrings__Database: Host=postgres;Database=notifications_db;Username=notifications;Password=notifications_dev;Maximum Pool Size=40
       Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
@@ -124,6 +142,41 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
     secretEnv: {}
 
+  # Phase 2 services (rendered only with phase2.enabled). MongoDB runs without authentication, as in compose.yaml.
+  reporting:
+    phase2: true
+    image: ledgerline-reporting:local
+    replicas: 1
+    port: 8080
+    migrate: false
+    env:
+      ConnectionStrings__Mongo: mongodb://mongo:27017
+      Reporting__Kafka__BootstrapServers: kafka:9092
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    secretEnv: {}
+
+  reconciliation:
+    phase2: true
+    image: ledgerline-reconciliation:local
+    replicas: 1
+    port: 8080
+    migrate: true
+    env:
+      ConnectionStrings__Redis: redis:6379
+      Bank__BaseUrl: http://banksim:8080
+      Reconciliation__Kafka__BootstrapServers: kafka:9092
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    secretEnv:
+      ConnectionStrings__Database: Host=postgres;Database=reconciliation_db;Username=reconciliation;Password=reconciliation_dev;Maximum Pool Size=40
+      Messaging__RabbitMq__Uri: amqp://ledgerline:ledgerline_dev@rabbitmq:5672/
+      Bank__ApiKey: ledgerline-bank-local-dev
+
 # Dev-grade, single-replica infrastructure, written by hand with the same images as compose.yaml (templates/infra/*,
 # no Bitnami charts, no operators). Each component can be switched off with infra.<name>.enabled=false to use an
 # external one; the Kubernetes Service names (postgres, rabbitmq, redis, keycloak, otel-lgtm, mailpit) are the host names
@@ -145,8 +198,11 @@ infra:
       limits:
         memory: 1Gi
 
-  # With enabled=false an external broker needs what files/local-events.json declares (the local.events queue bound to
-  # accounts.event.journal-entry-posted.v1), or the Accounts relay stalls on that unroutable event.
+  # With enabled=false an external broker needs what files/local-events.json declares: the local.events queue bound to
+  # accounts.event.journal-entry-posted.v1, payments.event.payment-completed.v1, payments.event.payment-failed.v1 and
+  # reconciliation.event.reconciliation-completed.v1 (exchange ledgerline.reconciliation). Without these the Accounts
+  # relay stalls on an unroutable event, and the Reconciliation outbox stops at its completion event (mandatory
+  # publish, NO_ROUTE).
   rabbitmq:
     enabled: true
     image: rabbitmq:4.4-management
@@ -217,3 +273,30 @@ infra:
         memory: 32Mi
       limits:
         memory: 128Mi
+
+  # Phase 2 infrastructure, rendered only with phase2.enabled (compose.yaml: kafka, kafka-init, mongo).
+  # Single-node KRaft broker and controller. The broker keeps the image's default heap (1 GiB), and the readiness command
+  # starts a second JVM (256 MiB) in the same container, hence the limit.
+  kafka:
+    enabled: true
+    image: apache/kafka:4.4.0
+    runAsUser: 1000
+    storage: 2Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+
+  mongo:
+    enabled: true
+    image: mongo:9.0
+    runAsUser: 999
+    storage: 1Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi

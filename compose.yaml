@@ -410,6 +410,66 @@ services:
       retries: 20
       start_period: 10s
 
+  # Phase 2 services. Run them with the override that turns on Kafka publishing in Accounts and Payments:
+  #   docker compose -f compose.yaml -f compose.phase2.yaml --profile app --profile phase2 up --build -d --wait
+  # Without compose.phase2.yaml the stream stays empty, so the read model and the reconciliation inputs stay empty too.
+  reporting:
+    profiles: [phase2]
+    image: ledgerline-reporting:local
+    build:
+      context: .
+      dockerfile: src/Services/Reporting/Ledgerline.Reporting/Dockerfile
+    environment:
+      ConnectionStrings__Mongo: mongodb://mongo:27017
+      Reporting__Kafka__BootstrapServers: kafka:9092
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      Auth__RequireHttpsMetadata: "false"
+    depends_on:
+      mongo: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+      keycloak: { condition: service_healthy }
+    healthcheck: *app-health
+
+  reconciliation-migrate:
+    profiles: [phase2]
+    image: ledgerline-reconciliation:local
+    build:
+      context: .
+      dockerfile: src/Services/Reconciliation/Ledgerline.Reconciliation/Dockerfile
+    command: [migrate]
+    restart: "no"
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=reconciliation_db;Username=reconciliation;Password=reconciliation_dev
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  reconciliation:
+    profiles: [phase2]
+    image: ledgerline-reconciliation:local
+    build:
+      context: .
+      dockerfile: src/Services/Reconciliation/Ledgerline.Reconciliation/Dockerfile
+    environment:
+      ConnectionStrings__Database: Host=postgres;Database=reconciliation_db;Username=reconciliation;Password=reconciliation_dev;Maximum Pool Size=40
+      ConnectionStrings__Redis: redis:6379
+      Messaging__RabbitMq__Uri: amqp://ledgerline:${RABBITMQ_PASSWORD:-ledgerline_dev}@rabbitmq:5672/
+      Bank__BaseUrl: http://banksim:8080
+      Bank__ApiKey: ${BANK_API_KEY:-ledgerline-bank-local-dev}
+      Reconciliation__Kafka__BootstrapServers: kafka:9092
+      Auth__Authority: http://keycloak:8081/realms/ledgerline
+      Auth__Audience: ledgerline-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      Auth__RequireHttpsMetadata: "false"
+    depends_on:
+      reconciliation-migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+      keycloak: { condition: service_healthy }
+    healthcheck: *app-health
+
 volumes:
   postgres-data:
   rabbitmq-data:
