@@ -19,13 +19,15 @@ public sealed class LedgerStagingConsumer : IStagingConsumer
     {
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(db);
-        var line = (JournalEntryLinePosted)EnvelopeSerializer.FromPayload(envelope.Payload, typeof(JournalEntryLinePosted));
-        if (line.JournalEntryId == Guid.Empty || line.LineNo < 1 || line.AccountId == Guid.Empty || line.PaymentId == Guid.Empty ||
-            string.IsNullOrEmpty(line.EntryType) || string.IsNullOrEmpty(line.Direction) || string.IsNullOrEmpty(line.Currency) ||
-            line.PostedAt == default)
-            throw new InvalidDataException("The ledger line lacks its entry, line number, account, payment, type, direction, currency or time.");
-        var isBankClearing = line.AccountId == BankClearingAccounts.IdFor(line.Currency);
-        var postedAt = line.PostedAt.ToUniversalTime();
+        var (line, isBankClearing, postedAt) = StagingConsumerLoop.ReadPayload(() =>
+        {
+            var parsed = (JournalEntryLinePosted)EnvelopeSerializer.FromPayload(envelope.Payload, typeof(JournalEntryLinePosted));
+            if (parsed.JournalEntryId == Guid.Empty || parsed.LineNo < 1 || parsed.AccountId == Guid.Empty || parsed.PaymentId == Guid.Empty ||
+                string.IsNullOrEmpty(parsed.EntryType) || string.IsNullOrEmpty(parsed.Direction) || string.IsNullOrEmpty(parsed.Currency) ||
+                parsed.PostedAt == default)
+                throw new InvalidDataException("The ledger line lacks its entry, line number, account, payment, type, direction, currency or time.");
+            return (parsed, parsed.AccountId == BankClearingAccounts.IdFor(parsed.Currency), parsed.PostedAt.ToUniversalTime());
+        });
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO staged_ledger_lines (journal_entry_id, line_no, account_id, is_bank_clearing, entry_type, direction,
                 amount_minor, currency, payment_id, posted_at)

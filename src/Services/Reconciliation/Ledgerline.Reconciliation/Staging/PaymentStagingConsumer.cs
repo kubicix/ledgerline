@@ -38,12 +38,15 @@ public sealed class PaymentStagingConsumer : IStagingConsumer
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(db);
         if (envelope.Type == RefundedType) return;
-        var e = Parsers[envelope.Type](envelope.Payload);
-        // Deserialization leaves missing fields at their defaults, which would otherwise be staged as an empty payment.
-        if (e.PaymentId == Guid.Empty || string.IsNullOrEmpty(e.Kind) || string.IsNullOrEmpty(e.Status) ||
-            string.IsNullOrEmpty(e.Currency) || e.OccurredAt == default)
-            throw new InvalidDataException("The payment event lacks its payment, kind, status, currency or time.");
-        var occurredAt = e.OccurredAt.ToUniversalTime();
+        var (e, occurredAt) = StagingConsumerLoop.ReadPayload(() =>
+        {
+            var parsed = Parsers[envelope.Type](envelope.Payload);
+            // Deserialization leaves missing fields at their defaults, which would otherwise be staged as an empty payment.
+            if (parsed.PaymentId == Guid.Empty || string.IsNullOrEmpty(parsed.Kind) || string.IsNullOrEmpty(parsed.Status) ||
+                string.IsNullOrEmpty(parsed.Currency) || parsed.OccurredAt == default)
+                throw new InvalidDataException("The payment event lacks its payment, kind, status, currency or time.");
+            return (parsed, parsed.OccurredAt.ToUniversalTime());
+        });
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO staged_payments (payment_id, kind, status, amount_minor, currency, bank_capture_id, occurred_at, last_message_id)
             VALUES ({e.PaymentId}, {e.Kind}, {e.Status}, {e.AmountMinor}, {e.Currency}, {e.BankCaptureId}, {occurredAt}, {envelope.MessageId})

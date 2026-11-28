@@ -87,21 +87,30 @@ public sealed class StagingHost : IAsyncDisposable
         }
     }
 
-    /// <summary>The group's committed offset, or null when none is committed yet or the broker did not answer in time.</summary>
+    /// <summary>
+    /// The group's committed offset, or null when none is committed yet or the broker did not answer in time. Only for
+    /// positive checks polled with <c>Eventually</c>; a negative check uses <see cref="CommittedOffsetOrThrowAsync"/>.
+    /// </summary>
     public async Task<long?> CommittedOffsetAsync(TopicPartition partition)
     {
         try
         {
-            var results = await admin.ListConsumerGroupOffsetsAsync(
-                [new ConsumerGroupTopicPartitions(Options.GroupId, [partition])],
-                new ListConsumerGroupOffsetsOptions { RequestTimeout = TimeSpan.FromSeconds(5) });
-            var offset = results.Single().Partitions.Single().Offset;
-            return offset == Offset.Unset ? null : offset.Value;
+            return await CommittedOffsetOrThrowAsync(partition);
         }
         catch (KafkaException e) when (e.Error.Code is ErrorCode.Local_TimedOut or ErrorCode.RequestTimedOut)
         {
             return null;
         }
+    }
+
+    /// <summary>The group's committed offset, or null only when none is committed; a broker timeout throws.</summary>
+    public async Task<long?> CommittedOffsetOrThrowAsync(TopicPartition partition)
+    {
+        var results = await admin.ListConsumerGroupOffsetsAsync(
+            [new ConsumerGroupTopicPartitions(Options.GroupId, [partition])],
+            new ListConsumerGroupOffsetsOptions { RequestTimeout = TimeSpan.FromSeconds(5) });
+        var offset = results.Single().Partitions.Single().Offset;
+        return offset == Offset.Unset ? null : offset.Value;
     }
 
     public async ValueTask DisposeAsync()

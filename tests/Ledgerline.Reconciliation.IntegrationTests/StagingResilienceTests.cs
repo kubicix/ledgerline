@@ -11,13 +11,16 @@ namespace Ledgerline.Reconciliation.IntegrationTests;
 /// <summary>The staging loop's failure rules of ruling S2: poison records are skipped, and Kafka is no readiness dependency.</summary>
 public sealed class StagingResilienceTests(InfrastructureFixture infrastructure)
 {
-    [Fact]
-    public async Task Poison_record_is_skipped_and_the_partition_moves_on()
+    [Theory]
+    [InlineData("not-an-envelope")]
+    [InlineData("time-out-of-range")]
+    public async Task Poison_record_is_skipped_and_the_partition_moves_on(string poisonKind)
     {
+        using var metrics = MetricRecorder.ForMeter("Ledgerline.Reconciliation");
         await using var host = await StagingHost.StartAsync(infrastructure);
         var payment = Guid.NewGuid();
         var at = new DateTimeOffset(2026, 11, 27, 10, 0, 0, TimeSpan.Zero);
-        var poison = await host.ProduceAsync(host.Options.PaymentEventsTopic, payment, "not an envelope"u8.ToArray());
+        var poison = await host.ProduceAsync(host.Options.PaymentEventsTopic, payment, Poison(poisonKind, payment));
         var envelope = new MessageEnvelope(Guid.NewGuid(), typeof(PaymentAuthorized).GetCustomAttribute<MessageTypeAttribute>()!.Name,
             DateTimeOffset.UtcNow, Guid.NewGuid(), null, null,
             EnvelopeSerializer.ToPayload(new PaymentAuthorized(payment, "TopUp", Guid.NewGuid(), 100, "TRY", null, Guid.NewGuid(), at, at.AddDays(7))));
@@ -35,6 +38,25 @@ public sealed class StagingResilienceTests(InfrastructureFixture infrastructure)
         reader.GetString(0).ShouldBe("Authorized");
         reader.GetGuid(1).ShouldBe(envelope.MessageId);
         (await reader.ReadAsync(TestContext.Current.CancellationToken)).ShouldBeFalse();
+        // Skipped as poison, not applied in some other way: counted once for this topic.
+        metrics.Of("ledgerline.reconciliation.staging.poison", m => (string?)m.Tag("topic") == poison.Topic)
+            .Select(m => (long)m.Value).ShouldBe([1L]);
+    }
+
+    /// <summary>
+    /// Bytes that are no envelope, or a payment event whose time (UTC before year 1) cannot be converted; the JSON
+    /// reader reports the second as a <see cref="System.Text.Json.JsonException"/> with a <see cref="FormatException"/> inside.
+    /// </summary>
+    private static byte[] Poison(string kind, Guid payment)
+    {
+        if (kind == "not-an-envelope") return "not an envelope"u8.ToArray();
+        var payload = System.Text.Json.JsonDocument.Parse($$"""
+            {"paymentId":"{{payment}}","kind":"TopUp","customerId":"{{Guid.NewGuid()}}","amountMinor":100,"currency":"TRY",
+             "sourceAccountId":null,"destinationAccountId":"{{Guid.NewGuid()}}","occurredAt":"0001-01-01T00:00:00+05:00",
+             "authorizationExpiresAt":"2026-12-04T10:00:00+00:00"}
+            """).RootElement.Clone();
+        return EnvelopeSerializer.Serialize(new MessageEnvelope(Guid.NewGuid(),
+            typeof(PaymentAuthorized).GetCustomAttribute<MessageTypeAttribute>()!.Name, DateTimeOffset.UtcNow, Guid.NewGuid(), null, null, payload));
     }
 
     [Fact]
@@ -55,7 +77,8 @@ public sealed class StagingResilienceTests(InfrastructureFixture infrastructure)
                 m => (string?)m.Tag("topic") == record.Topic).Length > StagingConsumerLoop.MaxAttempts),
             TimeSpan.FromSeconds(60), "The staging loop did not retry the record.");
         host.Progress.LastCommitted(record.TopicPartition).ShouldBeNull();
-        (await host.CommittedOffsetAsync(record.TopicPartition)).ShouldBeNull();
+        // Strict: a broker timeout fails the test instead of reading as "nothing committed".
+        (await host.CommittedOffsetOrThrowAsync(record.TopicPartition)).ShouldBeNull();
         metrics.Of("ledgerline.reconciliation.staging.poison", m => (string?)m.Tag("topic") == record.Topic).ShouldBeEmpty();
 
         await Infrastructure.MigrateCommand.RunAsync(host.ConnectionString, TestContext.Current.CancellationToken);

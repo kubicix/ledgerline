@@ -53,12 +53,16 @@ public sealed partial class StagingConsumerLoop : BackgroundService
     }
 
     /// <summary>
-    /// Bad data, which no retry can fix: an envelope or payload that does not parse or fails validation
-    /// (<see cref="JsonException"/>, <see cref="InvalidDataException"/>), or a <see cref="PostgresException"/> of SQLSTATE
-    /// class 22 (data exception) or 23 (integrity constraint violation). Every other failure is not the record's fault
-    /// and is retried without committing: connection failures, timeouts, an <see cref="NpgsqlException"/> without a
-    /// server error, failed authentication (class 28), a missing database (3D000) or table (42P01, before migrate),
-    /// classes 53 and 57, serialization failures and deadlocks (40001, 40P01), and any other class.
+    /// Bad data, which no retry can fix: an envelope or payload that does not parse, convert or validate
+    /// (<see cref="JsonException"/>, or <see cref="InvalidDataException"/>, which <see cref="ReadPayload{T}"/> also
+    /// raises for an <see cref="ArgumentException"/>, <see cref="FormatException"/> or <see cref="OverflowException"/>
+    /// while reading a payload), or a <see cref="PostgresException"/> of SQLSTATE class 22 (data exception) or 23
+    /// (integrity constraint violation). Database exceptions are classified first, so a driver error is never taken for
+    /// bad data. Every other failure is not the record's fault and is retried without committing: connection failures,
+    /// timeouts, an <see cref="NpgsqlException"/> without a server error, failed authentication (class 28), a missing
+    /// database (3D000) or table (42P01, before migrate), classes 53 and 57, serialization failures and deadlocks
+    /// (40001, 40P01), any other class, and any other exception, an argument error outside payload reading (for
+    /// example a bad connection string) included.
     /// </summary>
     public static bool IsPoison(Exception error)
     {
@@ -66,9 +70,28 @@ public sealed partial class StagingConsumerLoop : BackgroundService
         {
             if (current is PostgresException postgres) return postgres.SqlState.StartsWith("22", StringComparison.Ordinal) ||
                 postgres.SqlState.StartsWith("23", StringComparison.Ordinal);
+            if (current is NpgsqlException) return false;
             if (current is JsonException or InvalidDataException) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Runs the parse and convert step of a staging consumer. An argument, format or overflow error there comes from the
+    /// record's data, so it is rethrown as <see cref="InvalidDataException"/> and the record becomes poison; the same
+    /// exception types raised later, by the database step, stay retryable.
+    /// </summary>
+    public static T ReadPayload<T>(Func<T> read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        try
+        {
+            return read();
+        }
+        catch (Exception error) when (error is ArgumentException or FormatException or OverflowException)
+        {
+            throw new InvalidDataException("The record's payload could not be read.", error);
+        }
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
