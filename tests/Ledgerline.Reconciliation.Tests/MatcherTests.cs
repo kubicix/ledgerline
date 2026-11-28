@@ -64,6 +64,7 @@ public sealed class MatcherTests
         var result = Run([], [Payment(P1)], TopUp(P1, 2000));
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.LedgerEntryNotAtBank, P1.ToString(), null, 2000, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -72,6 +73,7 @@ public sealed class MatcherTests
         var result = Run([Capture(P1, 1000)], [Payment(P1)], TopUp(P1, 900));
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.AmountMismatch, P1.ToString(), 1000, 900, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -80,6 +82,7 @@ public sealed class MatcherTests
         var result = Run([Capture(P1, 1000, "TRY")], [Payment(P1)], TopUp(P1, 1000, "USD"));
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.AmountMismatch, P1.ToString(), 1000, 1000, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -88,6 +91,7 @@ public sealed class MatcherTests
         var result = Run([], [Payment(P1)], []);
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.PaymentLedgerMismatch, P1.ToString(), null, null, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -96,6 +100,7 @@ public sealed class MatcherTests
         var result = Run([Capture(P1)], [Payment(P1, "ManualReview")], TopUp(P1));
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.PaymentLedgerMismatch, P1.ToString(), null, 1000, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -104,6 +109,7 @@ public sealed class MatcherTests
         var result = Run([Capture(P1, 700)], [Payment(P1, "Compensated", 700)], []);
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.RefundMissingAtBank, P1.ToString(), 700, null, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -114,6 +120,7 @@ public sealed class MatcherTests
         var result = Run([Capture(unknown, 400)], [], []);
 
         result.Mismatches.ShouldBe([new Mismatch(MismatchCode.UnknownBankRecord, unknown.ToString(), 400, null, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -151,6 +158,7 @@ public sealed class MatcherTests
         var result = Run([Capture(P1)], [Payment(P1)], []);
 
         result.Mismatches.Select(m => m.Code).ShouldBe([MismatchCode.BankCaptureNotInLedger, MismatchCode.PaymentLedgerMismatch]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -258,5 +266,52 @@ public sealed class MatcherTests
         var result = Run([Capture(P1, 600), Capture(P1, 400)], [Payment(P1)], TopUp(P1, 1000));
 
         result.Mismatches.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void An_unknown_bank_reference_with_a_ledger_debit_and_no_staged_payment_reports_only_UnknownBankRecord()
+    {
+        var unknown = Guid.Parse("0193a7f2-5a00-7000-8000-0000000000ff");
+
+        var result = Run([Capture(unknown, 400)], [], TopUp(unknown, 400));
+
+        result.Mismatches.ShouldBe([new Mismatch(MismatchCode.UnknownBankRecord, unknown.ToString(), 400, null, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_topup_that_straddles_midnight_reports_a_reverse_PaymentLedgerMismatch_on_the_day_of_the_ledger_line()
+    {
+        var posted = new DateTimeOffset(2026, 11, 13, 23, 59, 59, TimeSpan.Zero);
+        var completed = new DateTimeOffset(2026, 11, 14, 0, 0, 2, TimeSpan.Zero);
+
+        var result = Run([Capture(P1, at: posted)], [Payment(P1, at: completed)], TopUp(P1, at: posted));
+
+        result.Mismatches.ShouldBe([new Mismatch(MismatchCode.PaymentLedgerMismatch, P1.ToString(), null, 1000, "TRY")]);
+        result.MatchedPaymentIds.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_duplicate_staged_payment_row_resolves_to_the_latest_one_whatever_the_input_order()
+    {
+        var older = Payment(P1, "Completed", at: Noon);
+        var newer = Payment(P1, "Compensated", at: Noon.AddHours(1));
+        BankRecord[] bank = [Capture(P1), Refund(P1)];
+
+        var forward = Run(bank, [older, newer], []);
+        var reversed = Run(bank, [newer, older], []);
+
+        forward.Mismatches.ShouldBeEmpty();
+        forward.MatchedPaymentIds.ShouldBe([P1]);
+        reversed.MatchedPaymentIds.ShouldBe([P1]);
+        reversed.Mismatches.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_trial_balance_throws_instead_of_wrapping_when_a_debit_cannot_be_negated()
+    {
+        var line = new StagedLedgerLine(Guid.NewGuid(), 1, Wallet, false, "Transfer", "Debit", long.MinValue, "TRY", P1, Noon);
+
+        Should.Throw<OverflowException>(() => Run([], [], [line]));
     }
 }

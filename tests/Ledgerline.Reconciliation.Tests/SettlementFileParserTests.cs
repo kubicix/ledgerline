@@ -37,7 +37,7 @@ public sealed class SettlementFileParserTests
         var error = Should.Throw<SettlementFormatException>(() => SettlementFileParser.Parse(csv));
 
         error.LineNumber.ShouldBe(3);
-        error.Message.ShouldContain("3");
+        error.Message.ShouldContain("line 3");
     }
 
     [Theory]
@@ -53,6 +53,8 @@ public sealed class SettlementFileParserTests
         var error = Should.Throw<SettlementFormatException>(() => SettlementFileParser.Parse(csv));
 
         error.LineNumber.ShouldBe(2);
+        error.Message.ShouldContain("line 2");
+        error.Message.ShouldContain("amount_minor");
     }
 
     [Theory]
@@ -87,6 +89,10 @@ public sealed class SettlementFileParserTests
     [InlineData("CAPTURE,cap_1,r1,100,T1Y,2026-11-13T10:15:31Z")]
     [InlineData("CAPTURE,cap_1,r1,100,TRY,yesterday")]
     [InlineData("CAPTURE,cap_1,r1,100,TRY,2026-11-13T10:15:31+03:00")]
+    [InlineData("CAPTURE,cap_1,r1,100,TRY,2026-11-13T10:15:31")]
+    [InlineData("CAPTURE,cap_1,r1,100,TRY,2026-11-13T10:15:31.5")]
+    [InlineData("CAPTURE,cap_1,r1,100,try,2026-11-13T10:15:31Z")]
+    [InlineData("CAPTURE,cap_1,r1,100,Try,2026-11-13T10:15:31Z")]
     [InlineData("CAPTURE,,r1,100,TRY,2026-11-13T10:15:31Z")]
     [InlineData("CAPTURE,cap_1,,100,TRY,2026-11-13T10:15:31Z")]
     [InlineData("CAPTURE,\"cap_1\",r1,100,TRY,2026-11-13T10:15:31Z")]

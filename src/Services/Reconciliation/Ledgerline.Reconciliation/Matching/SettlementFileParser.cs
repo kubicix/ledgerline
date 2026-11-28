@@ -67,16 +67,18 @@ public static class SettlementFileParser
             : throw new SettlementFormatException(lineNumber, $"amount_minor must be a whole number of minor units, found '{value}'.");
 
     private static string ParseCurrency(string value, int lineNumber) =>
-        value.Length == 3 && value.All(char.IsAsciiLetter)
+        value.Length == 3 && value.All(char.IsAsciiLetterUpper)
             ? value
-            : throw new SettlementFormatException(lineNumber, $"currency must be 3 letters, found '{value}'.");
+            : throw new SettlementFormatException(lineNumber, $"currency must be 3 upper case letters A-Z, found '{value}'.");
 
     private static DateTimeOffset ParseTimestamp(string value, int lineNumber)
     {
+        // The offset must be written out as Z or +00:00: a bare local time is not accepted as UTC.
+        var explicitUtc = value.EndsWith('Z') || value.EndsWith("+00:00", StringComparison.Ordinal);
         var parsed = DateTimeOffset.TryParseExact(value, TimestampFormats, CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal, out var timestamp);
-        return parsed && timestamp.Offset == TimeSpan.Zero
+            DateTimeStyles.None, out var timestamp);
+        return explicitUtc && parsed && timestamp.Offset == TimeSpan.Zero
             ? timestamp
-            : throw new SettlementFormatException(lineNumber, $"occurred_at must be an ISO 8601 UTC timestamp, found '{value}'.");
+            : throw new SettlementFormatException(lineNumber, $"occurred_at must be an ISO 8601 UTC timestamp ending in Z or +00:00, found '{value}'.");
     }
 }

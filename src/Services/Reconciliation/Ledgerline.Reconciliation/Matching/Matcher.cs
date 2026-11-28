@@ -16,12 +16,13 @@ public static class Matcher
     {
         var start = new DateTimeOffset(businessDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
         var end = start.AddDays(1);
-        var eligible = payments.Where(p => IsEligible(p) && InWindow(p.OccurredAt, start, end)).ToList();
+        var latest = LatestPerPayment(payments);
+        var eligible = latest.Where(p => IsEligible(p) && InWindow(p.OccurredAt, start, end)).ToList();
 
         var referenceItems = MatchReferences(
             [.. bank.Where(b => InWindow(b.OccurredAt, start, end))],
             [.. ledger.Where(l => InWindow(l.PostedAt, start, end))],
-            payments, eligible);
+            latest, eligible);
         var mismatches = referenceItems.Concat(TrialBalance(ledger, end)).OrderBy(m => m, MismatchOrder.Instance).ToList();
 
         var flagged = referenceItems.Select(m => m.Reference).ToHashSet(StringComparer.Ordinal);
@@ -29,13 +30,23 @@ public static class Matcher
         return new ReconciliationResult(matched, mismatches);
     }
 
+    /// <summary>
+    /// One row per payment id. Staging's primary key makes duplicates unexpected; if one shows up anyway, keep the row with
+    /// the latest OccurredAt (ties broken by status, ordinal) so the result stays deterministic.
+    /// </summary>
+    private static List<StagedPayment> LatestPerPayment(IReadOnlyList<StagedPayment> payments) =>
+    [
+        .. payments.GroupBy(p => p.PaymentId).Select(g => g
+            .OrderByDescending(p => p.OccurredAt).ThenByDescending(p => p.Status, StringComparer.Ordinal).First()),
+    ];
+
     private static bool IsEligible(StagedPayment payment) =>
         payment.Kind == TopUpType && payment.Status is CompletedStatus or CompensatedStatus;
 
     private static bool InWindow(DateTimeOffset moment, DateTimeOffset start, DateTimeOffset end) => moment >= start && moment < end;
 
     private static List<Mismatch> MatchReferences(
-        List<BankRecord> bank, List<StagedLedgerLine> ledger, IReadOnlyList<StagedPayment> allPayments, List<StagedPayment> eligible)
+        List<BankRecord> bank, List<StagedLedgerLine> ledger, List<StagedPayment> allPayments, List<StagedPayment> eligible)
     {
         var known = allPayments.Select(p => p.PaymentId).ToHashSet();
         var unknownBank = bank.Where(b => !Guid.TryParse(b.Reference, out var id) || !known.Contains(id)).ToList();
@@ -48,14 +59,16 @@ public static class Matcher
             Sum(knownBank.Where(b => b.Type == BankRecordType.Refund), b => Key(b.Reference), b => b.AmountMinor, b => b.Currency),
             Sum(ledger.Where(IsClearingTopUpDebit), l => l.PaymentId.ToString(), l => l.AmountMinor, l => l.Currency),
             eligible.ToDictionary(p => p.PaymentId.ToString(), StringComparer.Ordinal),
-            allPayments.Where(p => p.Status == CompletedStatus).Select(p => p.PaymentId.ToString()).ToHashSet(StringComparer.Ordinal));
+            // The reverse half of PaymentLedgerMismatch uses the in-window Completed set (R1, R2). A top-up that straddles
+            // midnight (ledger line before, payment completed after) reports on both days by design: the window is the UTC day.
+            eligible.Where(p => p.Status == CompletedStatus).Select(p => p.PaymentId.ToString()).ToHashSet(StringComparer.Ordinal));
 
-        var keys = day.Captures.Keys.Concat(day.Refunds.Keys).Concat(day.Ledger.Keys).Concat(day.Payments.Keys).Concat(unknownKeys)
+        var keys = day.Captures.Keys.Concat(day.Refunds.Keys).Concat(day.Ledger.Keys).Concat(day.Payments.Keys)
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
         foreach (var key in keys)
         {
-            // A bank row with an unknown reference supersedes every other code derived from the bank side.
-            items.AddRange(unknownKeys.Contains(key) ? LedgerOnlyChecks(key, day) : Check(key, day));
+            // A reference with an unknown bank row reports only UnknownBankRecord (R4); its other rows are not examined.
+            if (!unknownKeys.Contains(key)) items.AddRange(Check(key, day));
         }
         return items;
     }
@@ -101,7 +114,7 @@ public static class Matcher
             var signed = line.Direction switch
             {
                 "Credit" => line.AmountMinor,
-                "Debit" => -line.AmountMinor,
+                "Debit" => checked(-line.AmountMinor),
                 _ => throw new InvalidOperationException($"Unknown line direction '{line.Direction}'."),
             };
             balances[line.Currency] = checked(balances.GetValueOrDefault(line.Currency) + signed);
