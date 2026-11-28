@@ -873,7 +873,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T05: Reporting: payment timelines and merchant daily totals
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 4 (two collections). **Depends:** M5-T04.
 **Files:** `Projections/{PaymentTimelineProjection.cs,MerchantDailyTotalsProjection.cs}`. Test `ProjectionTests.cs`.

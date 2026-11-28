@@ -10,10 +10,14 @@ namespace Ledgerline.Reporting.Infrastructure;
 public class MongoCollections(IMongoDatabase database)
 {
     public const string AccountStatementsName = "account_statements";
+    public const string PaymentTimelinesName = "payment_timelines";
+    public const string MerchantDailyTotalsName = "merchant_daily_totals";
 
     public IMongoDatabase Database { get; } = database;
 
     public IMongoCollection<AccountStatementDocument> AccountStatements => Open<AccountStatementDocument>(AccountStatementsName);
+    public IMongoCollection<PaymentTimelineDocument> PaymentTimelines => Open<PaymentTimelineDocument>(PaymentTimelinesName);
+    public IMongoCollection<MerchantDailyTotalsDocument> MerchantDailyTotals => Open<MerchantDailyTotalsDocument>(MerchantDailyTotalsName);
 
     /// <summary>Creates the indexes of every collection. Idempotent: an existing identical index is left as it is.</summary>
     public async Task EnsureIndexesAsync(CancellationToken ct)

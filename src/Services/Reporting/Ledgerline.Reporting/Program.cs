@@ -21,6 +21,8 @@ builder.Services.AddSingleton<MongoCollections>();
 builder.Services.AddSingleton(services => ConsumerOptions.From(services.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<DeadLetterProducer>();
 builder.Services.AddSingleton<IProjection, AccountStatementProjection>();
+builder.Services.AddSingleton<IProjection, PaymentTimelineProjection>();
+builder.Services.AddSingleton<IProjection, MerchantDailyTotalsProjection>();
 builder.Services.AddHostedService<KafkaConsumerLoop>();
 
 var app = builder.Build();
