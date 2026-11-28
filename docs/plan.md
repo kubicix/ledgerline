@@ -944,8 +944,8 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ## Milestone 5 checklist
 
-- [ ] Kafka event stream fed through the outbox, outage isolated from RabbitMQ (M5-T02, M5-T03).
-- [ ] MongoDB read model with idempotent projections and a proven rebuild (M5-T04 to M5-T06).
+- [x] Kafka event stream fed through the outbox, outage isolated from RabbitMQ (M5-T02, M5-T03).
+- [x] MongoDB read model with idempotent projections and a proven rebuild (M5-T04 to M5-T06).
 - [ ] End-of-day reconciliation with a three-way match and every mismatch code tested (M5-T07 to M5-T10).
 - [ ] One command still starts everything, now with the Phase 2 profile (M5-T11). **DoD: one command**
 - [ ] ADR 0010 matches the code; ADR 0000 Phase 2 rows re-verified. **DoD: ADRs written**
