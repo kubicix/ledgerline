@@ -862,7 +862,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T04: Reporting service: consumer loop and account statements
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` sections 3, 4 (`account_statements`), 6 (Q1), 7. **Depends:** M5-T03.
 **Files:** Create `src/Services/Reporting/Ledgerline.Reporting/` (web project, references `BuildingBlocks`, `BuildingBlocks.Web`, `Contracts`; not `BuildingBlocks.Messaging.Kafka`: it consumes with `Confluent.Kafka` directly): `Program.cs`, `Consuming/{KafkaConsumerLoop.cs,IProjection.cs,DeadLetterProducer.cs}`, `Projections/AccountStatementProjection.cs`, `Infrastructure/MongoCollections.cs`; `tests/Ledgerline.Reporting.IntegrationTests/` with `AccountStatementTests.cs`. Add both to the solution and the service to `ServiceIsolationTests.Deployables`.

@@ -53,6 +53,7 @@ public class ServiceIsolationTests
         typeof(Ledgerline.Payments.Program).Assembly,
         typeof(Ledgerline.Risk.Program).Assembly,
         typeof(Ledgerline.Notifications.Program).Assembly,
+        typeof(Ledgerline.Reporting.Program).Assembly,
         typeof(Ledgerline.BankSimulator.Program).Assembly,
         typeof(Ledgerline.Gateway.Program).Assembly,
     ];
