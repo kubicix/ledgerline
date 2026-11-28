@@ -3,9 +3,11 @@ using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.BuildingBlocks.Web.Telemetry;
 using Ledgerline.Contracts.Accounts;
 using Ledgerline.Contracts.Payments;
+using Ledgerline.Contracts.Reconciliation;
 using Ledgerline.Notifications.Features.List;
 using Ledgerline.Notifications.Features.PaymentEvents;
 using Ledgerline.Notifications.Features.Recipients;
+using Ledgerline.Notifications.Features.Reconciliation;
 using Ledgerline.Notifications.Infrastructure;
 using Ledgerline.Notifications.Sending;
 using Microsoft.EntityFrameworkCore;
@@ -35,7 +37,8 @@ builder.Services.AddLedgerlineInbox<NotificationsDbContext>(builder.Configuratio
     .Consume<PaymentCaptured, PaymentCapturedHandler>()
     .Consume<PaymentVoided, PaymentVoidedHandler>()
     .Consume<PaymentFailed, PaymentFailedHandler>()
-    .Consume<PaymentRefunded, PaymentRefundedHandler>());
+    .Consume<PaymentRefunded, PaymentRefundedHandler>()
+    .Consume<ReconciliationMismatchDetected, MismatchDetectedHandler>());
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
 app.MapNotifications();

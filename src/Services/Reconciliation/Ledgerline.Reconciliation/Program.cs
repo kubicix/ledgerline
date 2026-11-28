@@ -1,6 +1,7 @@
 using Ledgerline.BuildingBlocks.Messaging;
 using Ledgerline.BuildingBlocks.Web;
 using Ledgerline.BuildingBlocks.Web.Telemetry;
+using Ledgerline.Reconciliation.Features;
 using Ledgerline.Reconciliation.Infrastructure;
 using Ledgerline.Reconciliation.Runs;
 using Ledgerline.Reconciliation.Staging;
@@ -49,6 +50,7 @@ builder.Services.AddReconciliationScheduler(builder.Configuration.GetValue<bool?
 
 var app = builder.Build();
 app.UseLedgerlineWebDefaults();
+app.MapReconciliationEndpoints();
 app.Run();
 
 namespace Ledgerline.Reconciliation

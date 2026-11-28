@@ -924,7 +924,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T10: Reconciliation API and downstream consumers
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` section 5; `payments.md` section 5 (reconciled); `notifications.md` section 2 (mismatch row). **Depends:** M5-T09.
 **Files:** Reconciliation `Features/{StartRunEndpoint.cs,ListRunsEndpoint.cs,GetRunEndpoint.cs,ListItemsEndpoint.cs}`; Payments `Features/Reconciliation/PaymentsReconciledHandler.cs`; Notifications `Features/Reconciliation/MismatchDetectedHandler.cs`, template `reconciliation-mismatch`, option `Notifications:OperationsEmail`. Tests in each service's integration project: `ReconciliationApiTests.cs`, `ReconciledTests.cs`, extend `NotificationFlowTests.cs`.

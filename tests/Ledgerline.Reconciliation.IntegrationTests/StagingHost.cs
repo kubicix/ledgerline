@@ -38,6 +38,9 @@ public sealed class StagingHost : IAsyncDisposable
 
     public IServiceProvider Services => host.Services;
 
+    /// <summary>An HTTP client for the service's API, signed in as <paramref name="userId"/> with <paramref name="roles"/> (none when null).</summary>
+    public HttpClient CreateClient(Guid? userId = null, string roles = "customer") => host.CreateClient(userId, roles);
+
     /// <param name="infrastructure">The fixture's containers.</param>
     /// <param name="migrated">False starts the service on an empty database, as before <c>migrate</c> ran.</param>
     /// <param name="extraSettings">Host settings on top of the staging ones. The Quartz scheduler is off unless they turn it on.</param>

@@ -18,6 +18,8 @@ using Ledgerline.Contracts.Payments;
 using Ledgerline.Contracts.Risk;
 using Ledgerline.Payments.Features.RiskReplies;
 using Ledgerline.Payments.Features.Refunds;
+using Ledgerline.Payments.Features.Reconciliation;
+using Ledgerline.Contracts.Reconciliation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -69,7 +71,8 @@ builder.Services.AddLedgerlineMessaging<PaymentsDbContext>(builder.Configuration
         .Consume<RiskApproved, RiskApprovedHandler>().Consume<RiskRejected, RiskRejectedHandler>()
         .Consume<CallBank, CallBankHandler>()
         .Consume<LedgerOperationSucceeded, LedgerOperationSucceededHandler>()
-        .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>();
+        .Consume<LedgerOperationRejected, LedgerOperationRejectedHandler>()
+        .Consume<PaymentsReconciled, PaymentsReconciledHandler>();
     // Off by default. Only the payments.event.* types go to Kafka; commands and their timeouts stay on RabbitMQ alone.
     if (builder.Configuration.GetValue<bool>("Messaging:Kafka:Enabled"))
     {
