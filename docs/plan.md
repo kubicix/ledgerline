@@ -893,7 +893,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T07: Reconciliation: matching engine (pure)
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reconciliation.md` section 3 steps 5 and 6. **Depends:** none.
 **Files:** Create `src/Services/Reconciliation/Ledgerline.Reconciliation/` (web project; add to solution and to `Deployables`): `Matching/{BankRecord.cs,StagedPayment.cs,StagedLedgerLine.cs,Mismatch.cs,MismatchCode.cs,ReconciliationResult.cs,Matcher.cs,SettlementFileParser.cs}`; `tests/Ledgerline.Reconciliation.Tests/` with `MatcherTests.cs`, `SettlementFileParserTests.cs`.

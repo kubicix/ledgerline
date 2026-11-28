@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks/Ledgerline.BuildingBlocks.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/Ledgerline.BuildingBlocks.Web/Ledgerline.BuildingBlocks.Web.csproj" />
+    <ProjectReference Include="../../../Contracts/Ledgerline.Contracts/Ledgerline.Contracts.csproj" />
+  </ItemGroup>
+</Project>
