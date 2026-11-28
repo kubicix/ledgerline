@@ -38,7 +38,12 @@ public sealed class ReportingHost : IAsyncDisposable
     public IMongoDatabase Database { get; }
     public string BootstrapServers { get; }
 
-    public static async Task<ReportingHost> StartAsync(InfrastructureFixture infrastructure, Action<IServiceCollection>? overrides = null)
+    /// <param name="beforeStart">
+    /// Runs after the topics exist and before Reporting starts, for example to produce records the first batch must
+    /// contain. It must not touch <see cref="Services"/>, which would start the host.
+    /// </param>
+    public static async Task<ReportingHost> StartAsync(InfrastructureFixture infrastructure, Action<IServiceCollection>? overrides = null,
+        Func<ReportingHost, Task>? beforeStart = null)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
         var suffix = Guid.NewGuid().ToString("N");
@@ -70,14 +75,16 @@ public sealed class ReportingHost : IAsyncDisposable
             ["ConnectionStrings:Mongo"] = mongo,
             ["Reporting:Mongo:Database"] = databaseName
         }, overrides);
+        var host = new ReportingHost(factory, bootstrapServers, options, new MongoClient(mongo).GetDatabase(databaseName));
         try
         {
+            if (beforeStart is not null) await beforeStart(host);
             _ = factory.Services;
-            return new ReportingHost(factory, bootstrapServers, options, new MongoClient(mongo).GetDatabase(databaseName));
+            return host;
         }
         catch
         {
-            await factory.DisposeAsync();
+            await host.DisposeAsync();
             throw;
         }
     }

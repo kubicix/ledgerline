@@ -78,9 +78,49 @@ public sealed class AccountStatementTests(InfrastructureFixture infrastructure)
     }
 
     [Fact]
-    public async Task Offsets_are_not_committed_when_mongo_write_fails()
+    public Task Offsets_are_not_committed_when_mongo_write_fails() =>
+        WriteFailureIsRetriedAsync(new MongoFaults { Failing = true });
+
+    [Fact]
+    public Task Write_concern_failure_is_retried_not_dead_lettered() =>
+        WriteFailureIsRetriedAsync(new MongoFaults { Failing = true, Error = MongoFaults.WriteConcernTimeout });
+
+    [Fact]
+    public async Task Each_dead_lettered_record_is_committed_before_the_next_record_is_tried()
     {
-        var faults = new MongoFaults { Failing = true };
+        var key = Ids.New().ToString();
+        var poison = new List<DeliveryResult<string, byte[]>>();
+        DeliveryResult<string, byte[]>? goodRecord = null;
+        var good = Line();
+        // Produced before Reporting starts, so the first batch holds all four records.
+        await using var host = await ReportingHost.StartAsync(infrastructure, beforeStart: async starting =>
+        {
+            for (var i = 0; i < 3; i++) poison.Add(await starting.ProduceAsync(starting.Options.LedgerEntriesTopic, key, PoisonRecord()));
+            goodRecord = await starting.ProduceAsync(starting.Options.LedgerEntriesTopic, key, Record(good));
+        });
+        var dead = new TopicPartition(host.Options.DeadLetterTopic, 0);
+        using var reader = DeadReader(host);
+
+        // The first poison record's offset is committed while the next ones are still being tried (each takes four
+        // retry waits), not only at the end of the batch.
+        await Eventually.ShouldAsync(async () => await host.CommittedOffsetAsync(poison[0].TopicPartition) >= poison[0].Offset.Value + 1,
+            KafkaWait, "The first dead-lettered record was not committed.");
+        reader.QueryWatermarkOffsets(dead, TimeSpan.FromSeconds(10)).High.Value
+            .ShouldBeLessThan(poison.Count, "The commit waited for the whole batch.");
+
+        await WaitForCommitAsync(host, goodRecord!);
+        await WaitForStatementAsync(host, $"{good.JournalEntryId}:1");
+        // Each poison record exactly once, in order: no replay of the batch dead-lettered them again.
+        reader.QueryWatermarkOffsets(dead, TimeSpan.FromSeconds(10)).High.Value.ShouldBe(poison.Count);
+        reader.Assign(new TopicPartitionOffset(dead, Offset.Beginning));
+        var sources = new List<string?>();
+        for (var i = 0; i < poison.Count; i++) sources.Add(Header(reader.Consume(KafkaWait).ShouldNotBeNull(), DeadLetterProducer.SourceOffsetHeader));
+        reader.Close();
+        sources.ShouldBe(poison.Select(x => x.Offset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList<string?>());
+    }
+
+    private async Task WriteFailureIsRetriedAsync(MongoFaults faults)
+    {
         await using var host = await ReportingHost.StartAsync(infrastructure, services =>
         {
             services.RemoveAll<MongoCollections>();
@@ -100,6 +140,9 @@ public sealed class AccountStatementTests(InfrastructureFixture infrastructure)
         faults.Failing = false;
         await WaitForStatementAsync(host, $"{line.JournalEntryId}:1");
         await WaitForCommitAsync(host, record);
+        using var reader = DeadReader(host);
+        reader.QueryWatermarkOffsets(new TopicPartition(host.Options.DeadLetterTopic, 0), TimeSpan.FromSeconds(10)).High.Value
+            .ShouldBe(0, "A failed write was dead-lettered.");
     }
 
     [Fact]
@@ -124,12 +167,7 @@ public sealed class AccountStatementTests(InfrastructureFixture infrastructure)
         (await StatementsAsync(host)).Count.ShouldBe(1);
 
         var dead = new TopicPartition(host.Options.DeadLetterTopic, 0);
-        using var consumer = new ConsumerBuilder<byte[], byte[]>(new ConsumerConfig
-        {
-            BootstrapServers = host.BootstrapServers,
-            GroupId = "dead-reader-" + Guid.NewGuid().ToString("N"),
-            EnableAutoCommit = false
-        }).Build();
+        using var consumer = DeadReader(host);
         consumer.QueryWatermarkOffsets(dead, TimeSpan.FromSeconds(10)).High.Value.ShouldBe(1, "Exactly one record is dead-lettered.");
         consumer.Assign(new TopicPartitionOffset(dead, Offset.Beginning));
         var deadRecord = consumer.Consume(KafkaWait).ShouldNotBeNull();
@@ -171,6 +209,17 @@ public sealed class AccountStatementTests(InfrastructureFixture infrastructure)
         using var ready = await client.GetAsync(new Uri("/health/ready", UriKind.Relative), TestContext.Current.CancellationToken);
         ready.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
+
+    private static IConsumer<byte[], byte[]> DeadReader(ReportingHost host) => new ConsumerBuilder<byte[], byte[]>(new ConsumerConfig
+    {
+        BootstrapServers = host.BootstrapServers,
+        GroupId = "dead-reader-" + Guid.NewGuid().ToString("N"),
+        EnableAutoCommit = false
+    }).Build();
+
+    /// <summary>A line record whose payload has none of the line's fields: the projection rejects it.</summary>
+    private static byte[] PoisonRecord() => EnvelopeSerializer.Serialize(new MessageEnvelope(Ids.New(), LineType,
+        DateTimeOffset.UtcNow, Ids.New(), null, null, JsonDocument.Parse("{}").RootElement));
 
     private static JournalEntryLinePosted Line(DateTimeOffset? postedAt = null) =>
         new(Ids.New(), "Transfer", Ids.New(), "TRY", postedAt ?? new DateTimeOffset(2026, 11, 13, 10, 16, 2, TimeSpan.Zero),

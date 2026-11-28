@@ -13,8 +13,13 @@ namespace Ledgerline.Reporting.Consuming;
 /// of the batch is sought back to its first unapplied record, and the loop backs off and consumes again. Such
 /// failures are retried without limit and never dead-letter.</item>
 /// <item>Any other failure of a record is retried in place up to <see cref="MaxAttempts"/> times; then the record goes
-/// to the dead topic and, once Kafka persisted it there, counts as applied.</item>
+/// to the dead topic and, once Kafka persisted it there, counts as applied. The batch ends at that record: its
+/// offset is committed at once and the rest of the batch is consumed again, so one batch retries at most one poison
+/// record. Between two <c>Consume</c> calls the loop therefore spends at most the batch's successful writes, one
+/// failed write (bounded by MongoDB's server selection timeout), and either the backoff or one record's four retry
+/// waits plus the dead-letter produce: well under librdkafka's 300 s <c>max.poll.interval.ms</c> at the defaults.</item>
 /// <item>A record whose type no projection handles counts as applied.</item>
+/// <item>A failed offset commit replaces the consumer, which resumes from the offsets Kafka really holds.</item>
 /// </list>
 /// The blocking consumer runs on its own thread.
 /// </summary>
@@ -46,8 +51,16 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
     /// labels retryable. Such records are retried without limit and never dead-lettered. Every other exception,
     /// other driver errors included (a duplicate key, a failed command), counts as an attempt of the record.
     /// </summary>
+    /// <remarks>
+    /// A single write (<c>ReplaceOne</c>, <c>UpdateOne</c>) runs as a bulk write, and the driver reports a write concern
+    /// failure there as a <see cref="MongoWriteException"/> with <c>WriteConcernError</c> set and no <c>WriteError</c>,
+    /// not as <see cref="MongoWriteConcernException"/>; a wtimeout carries no retryable label. A bulk write reports
+    /// it the same way on <see cref="MongoBulkWriteException"/>.
+    /// </remarks>
     public static bool IsTransient(Exception error) => error is TimeoutException or MongoConnectionException
         or MongoExecutionTimeoutException or MongoWriteConcernException or MongoNotPrimaryException
+        or MongoWriteException { WriteError: null, WriteConcernError: not null }
+        or MongoBulkWriteException { WriteErrors.Count: 0, WriteConcernError: not null }
         or MongoNodeIsRecoveringException or MongoWaitQueueFullException or MongoConnectionPoolPausedException
         || (error is MongoException mongo && (mongo.HasErrorLabel("RetryableWriteError") || mongo.HasErrorLabel("TransientTransactionError")));
 
@@ -70,7 +83,8 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
                 catch (Exception error)
                 {
-                    // A fatal client error or a failed seek: a new consumer resumes from the committed offsets.
+                    // A fatal client error, a failed commit or a failed seek: a new consumer resumes from the
+                    // committed offsets. Records applied since then are applied again (idempotently).
                     ConsumerRestarting(logger, error);
                     Close(consumer);
                     Wait(options.RetryMaxDelay, ct);
@@ -106,14 +120,14 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
         {
             var batch = NextBatch(consumer, ct);
             if (batch.Count == 0) continue;
-            var applied = Apply(batch, ct);
-            Commit(consumer, batch, applied);
-            if (applied == batch.Count)
+            var (done, retry) = Apply(batch, ct);
+            Commit(consumer, batch, done);
+            if (done < batch.Count) Rewind(consumer, batch, done);
+            if (!retry)
             {
                 failures = 0;
                 continue;
             }
-            Rewind(consumer, batch, applied);
             Wait(options.Backoff(++failures), ct);
         }
     }
@@ -135,29 +149,38 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
         return batch;
     }
 
-    /// <summary>Applies the batch in order and returns how many records, from the start, are done.</summary>
-    private int Apply(List<ConsumeResult<byte[], byte[]>> batch, CancellationToken ct)
+    /// <summary>
+    /// Applies the batch in order. Returns how many records, from the start, are done, and whether the loop must back
+    /// off before consuming the rest again. The batch also ends, without backoff, right after a dead-lettered record.
+    /// </summary>
+    private (int Done, bool Retry) Apply(List<ConsumeResult<byte[], byte[]>> batch, CancellationToken ct)
     {
         for (var i = 0; i < batch.Count; i++)
-            if (!TryApply(batch[i], ct)) return i;
-        return batch.Count;
+        {
+            switch (TryApply(batch[i], ct))
+            {
+                case Outcome.Retry: return (i, true);
+                case Outcome.DeadLettered: return (i + 1, false);
+            }
+        }
+        return (batch.Count, false);
     }
 
-    /// <summary>False when the record must be consumed again: MongoDB or the dead topic is unavailable.</summary>
-    private bool TryApply(ConsumeResult<byte[], byte[]> record, CancellationToken ct)
+    /// <summary><see cref="Outcome.Retry"/> when the record must be consumed again: MongoDB or the dead topic is unavailable.</summary>
+    private Outcome TryApply(ConsumeResult<byte[], byte[]> record, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
                 ApplyOnce(record, ct);
-                return true;
+                return Outcome.Applied;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception error) when (IsTransient(error))
             {
                 StoreUnavailable(logger, record.Topic, record.Partition.Value, record.Offset.Value, error);
-                return false;
+                return Outcome.Retry;
             }
             catch (Exception error)
             {
@@ -184,23 +207,27 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
         foreach (var projection in projections[envelope.Type]) projection.ApplyAsync(envelope, ct).GetAwaiter().GetResult();
     }
 
-    private bool TryDeadLetter(ConsumeResult<byte[], byte[]> record, Exception error, int attempts, CancellationToken ct)
+    private Outcome TryDeadLetter(ConsumeResult<byte[], byte[]> record, Exception error, int attempts, CancellationToken ct)
     {
         try
         {
             deadLetters.SendAsync(record, error, attempts, ct).GetAwaiter().GetResult();
             DeadLettered(logger, record.Topic, record.Partition.Value, record.Offset.Value, attempts);
-            return true;
+            return Outcome.DeadLettered;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception produceError)
         {
             DeadLetterFailed(logger, record.Topic, record.Partition.Value, record.Offset.Value, produceError);
-            return false;
+            return Outcome.Retry;
         }
     }
 
-    /// <summary>Commits the next offset after the last applied record of every partition in the applied prefix.</summary>
+    /// <summary>
+    /// Commits the next offset after the last applied record of every partition in the applied prefix. A failure
+    /// (for example after the consumer left the group) throws, and the loop replaces the consumer: carrying on would
+    /// treat the batch as committed while Kafka still holds the older offsets.
+    /// </summary>
     private void Commit(IConsumer<byte[], byte[]> consumer, List<ConsumeResult<byte[], byte[]>> batch, int applied)
     {
         if (applied == 0) return;
@@ -213,9 +240,8 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
         }
         catch (KafkaException error)
         {
-            // Nothing is lost: the records stay uncommitted and are applied again (idempotently) after a restart or
-            // a rebalance, and a later commit on the same partition covers them.
             CommitFailed(logger, error.Error.Code, error.Error.Reason);
+            throw;
         }
     }
 
@@ -285,6 +311,8 @@ public sealed partial class KafkaConsumerLoop : BackgroundService
     private static partial void DeadLetterFailed(ILogger logger, string topic, int partition, long offset, Exception error);
     [LoggerMessage(8, LogLevel.Debug, "No projection handles {Type}; {Topic} [{Partition}] @{Offset} skipped")]
     private static partial void Skipped(ILogger logger, string type, string topic, int partition, long offset);
+    private enum Outcome { Applied, DeadLettered, Retry }
+
     [LoggerMessage(9, LogLevel.Warning, "Offset commit failed with {Code}: {Reason}")]
     private static partial void CommitFailed(ILogger logger, ErrorCode code, string reason);
     [LoggerMessage(10, LogLevel.Error, "Kafka consumer failed; a new consumer resumes from the committed offsets")]

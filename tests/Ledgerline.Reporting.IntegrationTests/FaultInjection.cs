@@ -18,13 +18,38 @@ public sealed class MongoFaults
     public bool Failing { get => failing; set => failing = value; }
     public int Failures => Volatile.Read(ref failures);
 
+    /// <summary>The exception each failed call throws; by default the driver's connection failure.</summary>
+    public Func<Exception> Error { get; init; } = ConnectionFailure;
+
     internal Exception Fail()
     {
         Interlocked.Increment(ref failures);
-        // The exception the driver throws when the server goes away mid-operation.
-        return new MongoConnectionException(new ConnectionId(new ServerId(new ClusterId(), new DnsEndPoint("localhost", 27017))),
-            "Injected connection failure.");
+        return Error();
     }
+
+    /// <summary>The exception the driver throws when the server goes away mid-operation.</summary>
+    public static Exception ConnectionFailure() => new MongoConnectionException(ConnectionId(), "Injected connection failure.");
+
+    /// <summary>
+    /// What <c>ReplaceOne</c> throws on a write concern timeout (code 64, no error label): a write exception with a
+    /// write concern error and no write error. The driver builds <see cref="WriteConcernError"/> internally only, so
+    /// its constructor is called by reflection, with each parameter filled by its type.
+    /// </summary>
+    public static Exception WriteConcernTimeout()
+    {
+        var constructor = typeof(WriteConcernError).GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Single();
+        var arguments = constructor.GetParameters().Select(parameter => parameter.ParameterType switch
+        {
+            var type when type == typeof(int) => (object?)64,
+            var type when type == typeof(string) => parameter.Name == "codeName" ? "WriteConcernFailed" : "waiting for replication timed out",
+            var type when type == typeof(MongoDB.Bson.BsonDocument) => new MongoDB.Bson.BsonDocument("wtimeout", true),
+            var type when type.IsAssignableFrom(typeof(string[])) => Array.Empty<string>(),
+            var type => throw new InvalidOperationException("Unexpected WriteConcernError parameter " + type)
+        }).ToArray();
+        return new MongoWriteException(ConnectionId(), null, (WriteConcernError)constructor.Invoke(arguments), null);
+    }
+
+    private static ConnectionId ConnectionId() => new(new ServerId(new ClusterId(), new DnsEndPoint("localhost", 27017)));
 }
 
 /// <summary>Collections whose named collection fails every operation while <see cref="MongoFaults.Failing"/> is on.</summary>
