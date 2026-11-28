@@ -7,6 +7,8 @@ using RabbitMQ.Client.Exceptions;
 using System.Net;
 using System.Net.Sockets;
 using Npgsql;
+using Testcontainers.Kafka;
+using Testcontainers.MongoDb;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
@@ -22,23 +24,47 @@ public sealed class InfrastructureFixture : IAsyncLifetime
         .WithWaitStrategy(Wait.ForUnixContainer().AddCustomWaitStrategy(new AmqpReady()))
         .Build();
     private readonly RedisContainer redis = new RedisBuilder("redis:8.8-alpine").Build();
+    // Phase 2 containers start on first use only: most integration modules never touch Kafka or MongoDB.
+    private readonly Lazy<(KafkaContainer Container, string BootstrapServers)> kafka;
+    private readonly Lazy<(MongoDbContainer Container, string ConnectionString)> mongo;
+
+    public InfrastructureFixture()
+    {
+        kafka = new(StartKafka);
+        mongo = new(StartMongo);
+    }
 
     public string PostgresAdminConnectionString => postgres.GetConnectionString();
     public string RabbitMqUri => rabbit.GetConnectionString();
     public string RedisConnectionString => redis.GetConnectionString();
+    public string KafkaBootstrapServers => kafka.Value.BootstrapServers;
+    public string MongoConnectionString => mongo.Value.ConnectionString;
 
     public async ValueTask InitializeAsync() =>
         await Task.WhenAll(postgres.StartAsync(), rabbit.StartAsync(), redis.StartAsync());
 
     public async ValueTask DisposeAsync()
     {
-        await Task.WhenAll(postgres.DisposeAsync().AsTask(), rabbit.DisposeAsync().AsTask(), redis.DisposeAsync().AsTask());
+        var disposals = new List<Task>
+        {
+            postgres.DisposeAsync().AsTask(), rabbit.DisposeAsync().AsTask(), redis.DisposeAsync().AsTask()
+        };
+        if (kafka.IsValueCreated) disposals.Add(kafka.Value.Container.DisposeAsync().AsTask());
+        if (mongo.IsValueCreated) disposals.Add(mongo.Value.Container.DisposeAsync().AsTask());
+        await Task.WhenAll(disposals);
     }
 
     public Task StopRabbitMqAsync() => rabbit.StopAsync();
     public Task StartRabbitMqAsync() => rabbit.StartAsync();
     public Task StopRedisAsync() => redis.StopAsync();
     public Task StartRedisAsync() => redis.StartAsync();
+
+    // Kafka keeps its host port across stop and start: the container is built with a fixed host port, and the
+    // module rewrites the advertised listener on every start. Clients that reconnect to the bootstrap address
+    // taken before the outage therefore find the broker again. A restart wipes nothing: the log directory is
+    // part of the stopped container's filesystem.
+    public async Task StopKafkaAsync() => await (await Task.Run(() => kafka.Value)).Container.StopAsync();
+    public async Task StartKafkaAsync() => await (await Task.Run(() => kafka.Value)).Container.StartAsync();
 
     public Task<string> CreateRabbitMqUriAsync(string databaseName)
     {
@@ -71,11 +97,52 @@ public sealed class InfrastructureFixture : IAsyncLifetime
         return new NpgsqlConnectionStringBuilder(PostgresAdminConnectionString) { Database = name }.ConnectionString;
     }
 
+    private static (KafkaContainer Container, string BootstrapServers) StartKafka()
+    {
+        var container = new KafkaBuilder("apache/kafka:4.4.0")
+            .WithKRaft()
+            .WithPortBinding(FreePort(), KafkaBuilder.KafkaPort)
+            .WithWaitStrategy(Wait.ForUnixContainer().AddCustomWaitStrategy(new KafkaReady()))
+            .Build();
+        StartBlocking(container);
+        return (container, $"{container.Hostname}:{container.GetMappedPublicPort(KafkaBuilder.KafkaPort)}");
+    }
+
+    private static (MongoDbContainer Container, string ConnectionString) StartMongo()
+    {
+        var container = new MongoDbBuilder("mongo:9.0").Build();
+        StartBlocking(container);
+        return (container, container.GetConnectionString());
+    }
+
+    // The properties are synchronous, so the first access blocks while the container starts. Task.Run keeps the
+    // wait off any synchronization context of the calling test.
+    private static void StartBlocking(IContainer container)
+    {
+        try
+        {
+            Task.Run(() => container.StartAsync()).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            Task.Run(() => container.DisposeAsync().AsTask()).GetAwaiter().GetResult();
+            throw;
+        }
+    }
+
     private static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private sealed class KafkaReady : IWaitUntil
+    {
+        // Asks the broker itself through its in-container listener. Unlike a log line it is also correct after a
+        // restart, when the log still holds the lines of the previous run.
+        public async Task<bool> UntilAsync(IContainer container) =>
+            (await container.ExecAsync(["/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"])).ExitCode == 0;
     }
 
     private sealed class AmqpReady : IWaitUntil

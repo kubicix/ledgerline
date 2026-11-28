@@ -831,7 +831,7 @@ Before starting: re-verify the Phase 2 versions in ADR 0000 (`apache/kafka`, `mo
 
 ### M5-T01: Kafka and MongoDB in Compose and the test fixture
 
-- [ ] Done
+- [x] Done
 
 **Spec:** `reporting.md` section 2. **Depends:** M4 complete.
 **Files:** Modify `compose.yaml` (profile `phase2`: `kafka` in KRaft single-node mode with a healthcheck, `mongo`, a one-shot `kafka-init` creating the three topics with 6 partitions and `retention.ms=-1`); `tests/Ledgerline.Testing/InfrastructureFixture.cs` (lazy `KafkaBootstrapServers`, `MongoConnectionString` started on first use). Add `Testcontainers.Kafka`, `Testcontainers.MongoDb`, `Confluent.Kafka`, `MongoDB.Driver`. Test `tests/Ledgerline.BuildingBlocks.Messaging.IntegrationTests/Phase2FixtureTests.cs`.

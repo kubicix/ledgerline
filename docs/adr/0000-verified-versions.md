@@ -46,11 +46,13 @@ ADR refers to it instead of repeating numbers.
 | Microsoft.Extensions.Http.Resilience | 10.11.0 | MIT | Bank HTTP client retries and timeouts |
 | xunit.v3 | 4.0.3 | Apache-2.0 | Tests |
 | Shouldly | 4.3.0 | BSD-3-Clause | Assertions |
-| Testcontainers (PostgreSql, RabbitMq, and others) | 4.16.0 | MIT | Integration and failure tests |
+| Testcontainers (PostgreSql, RabbitMq, and others) | 4.16.0 | MIT | Integration and failure tests. All `Testcontainers.*` packages use one version; 4.17.0 exists and is not adopted here |
+| Testcontainers.Kafka | 4.16.0 | MIT | Phase 2 test fixture (M5-T01). Re-verified on nuget.org on 2026-11-28: targets net10.0 and supports the `apache/kafka` image (KRaft, vendor detected from the image name). Same version as the other Testcontainers packages |
+| Testcontainers.MongoDb | 4.16.0 | MIT | Phase 2 test fixture (M5-T01). Re-verified on nuget.org on 2026-11-28: targets net10.0. Same version as the other Testcontainers packages |
 | Microsoft.AspNetCore.Mvc.Testing | 10.0.15 | MIT | In-process service hosts in tests |
 | Quartz | 4.7.3 | Apache-2.0 | Phase 2 reconciliation schedule |
-| MongoDB.Driver | 3.14.0 | Apache-2.0 | Phase 2 read model |
-| Confluent.Kafka | 2.16.0 | Apache-2.0 | Phase 2 event stream |
+| MongoDB.Driver | 3.14.1 | Apache-2.0 | Phase 2 read model. Re-verified on nuget.org on 2026-11-28 (M5-T01): 3.14.1 is the latest stable, a patch above the 3.14.0 first recorded. Ships net6.0 and netstandard2.1 assets, no net10.0 target of its own; both run on net10.0 |
+| Confluent.Kafka | 2.16.0 | Apache-2.0 | Phase 2 event stream. Re-verified on nuget.org on 2026-11-28 (M5-T01): 2.16.0 is the latest stable, has a net10.0 asset, depends on librdkafka.redist 2.16.0 |
 
 Considered and not used:
 
@@ -74,8 +76,8 @@ Considered and not used:
 | quay.io/keycloak/keycloak | 26.8.2 | Released 2026-11-05. Keycloak has no LTS; only the newest release gets fixes |
 | grafana/otel-lgtm | 0.41.0 | Dev-only all-in-one: Grafana, Tempo, Loki, Prometheus, OTel Collector |
 | axllent/mailpit | v1.33.1 | Fake SMTP with a web UI |
-| apache/kafka | 4.4.0 | Phase 2. KRaft mode, no ZooKeeper |
-| mongo | 9.0 (9.0.8) | Phase 2. Re-verify at M5; 8.0 is the fallback |
+| apache/kafka | 4.4.0 | Phase 2. KRaft mode, no ZooKeeper. Re-verified on Docker Hub on 2026-11-28 (M5-T01): 4.4.0 is the newest stable tag (4.3.2 and 4.2.2 are the older lines). Apache-2.0. Health check uses `/opt/kafka/bin/kafka-broker-api-versions.sh` |
+| mongo | 9.0 (9.0.8) | Phase 2. Re-verified on Docker Hub on 2026-11-28 (M5-T01): 9.0.8 is the newest 9.x tag, so the 8.0 fallback is not needed. The server is SSPL-licensed; it is used unmodified as a dev and test container, the same position as Redis 8 above |
 | zricethezav/gitleaks | v8.30.1 | Secret scan for local runs. Docker Hub tag checked 2026-11-26; the README also names `ghcr.io/gitleaks/gitleaks` |
 | grafana/k6 | 2.4.0 | Load tests. Pulled on 2026-11-25: digest `sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276`, `k6 version` prints `k6 v2.4.0 (commit/dd9395906d, go1.27.3, linux/amd64)`. Script API checked for M3-T08, see below |
 | aquasec/trivy | 0.70.0 | Local image scan, same Trivy version as the CI action default. Docker Hub tag checked 2026-11-26 (no `v` prefix); pulled digest `sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e`. Used instead of `:latest` |
