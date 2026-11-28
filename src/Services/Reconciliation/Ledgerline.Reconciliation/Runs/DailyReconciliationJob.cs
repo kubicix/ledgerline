@@ -32,18 +32,22 @@ public sealed class RetryOptions
 /// <summary>
 /// The Quartz job of reconciliation.md section 3. Fired by the daily cron trigger it reconciles yesterday (UTC, by the
 /// injected clock); fired by a one-shot trigger it reconciles the date in the trigger's data. A run that ends Failed
-/// schedules a one-shot retry of the same date <see cref="RetryOptions.Interval"/> later, carrying the attempt count, up
-/// to <see cref="RetryOptions.MaxAttempts"/> retries. Every other exception is logged and swallowed: the run stays
-/// Running until a run of that date is started again, and the cron trigger never counts a failed fire.
+/// schedules a one-shot retry of the same date <see cref="RetryOptions.Interval"/> later; a run that found the date's
+/// lock held schedules one a lock TTL later (the holder may be a node that died with the lock). Both carry the attempt
+/// count and share one budget of <see cref="RetryOptions.MaxAttempts"/> retries. Every other exception is logged and
+/// swallowed: the run stays Running until a run of that date is started again, and the cron trigger never counts a
+/// failed fire.
 /// </summary>
 /// <remarks>
 /// The job requests recovery: when the scheduler instance running it dies mid-run, another node of the cluster (or this
 /// one on restart) re-executes it through a recovery trigger, and the re-execution reconciles the same business date
-/// (<see cref="BusinessDateOf"/>), so the crashed run's Running row is taken over by step 2.
+/// (<see cref="BusinessDateOf"/>), so the crashed run's Running row is taken over by step 2. A shutdown interrupts the
+/// job: the run stops where it is (Running), the lock is released, and the cancellation is rethrown so the store hands
+/// the firing back for recovery (<see cref="ReconciliationScheduling"/>).
 /// </remarks>
 [DisallowConcurrentExecution]
 public sealed partial class DailyReconciliationJob(
-    IServiceScopeFactory scopes, RetryOptions retry, IClock clock, ILogger<DailyReconciliationJob> logger) : IJob
+    IServiceScopeFactory scopes, RetryOptions retry, LockOptions lockOptions, IClock clock, ILogger<DailyReconciliationJob> logger) : IJob
 {
     public const string CronExpression = "0 30 0 * * ?";
     public const string BusinessDateKey = "businessDate";
@@ -66,11 +70,13 @@ public sealed partial class DailyReconciliationJob(
         {
             var outcome = await RunAsync(businessDate, cancellationToken);
             RunEnded(logger, businessDate, outcome, attempt);
-            if (outcome == RunOutcome.Failed) await ScheduleRetryAsync(context.Scheduler, businessDate, attempt, cancellationToken);
+            if (RetryDelay(outcome) is { } delay) await ScheduleRetryAsync(context.Scheduler, businessDate, attempt, delay, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             RunInterrupted(logger, businessDate);
+            // Stopping by throwing is what makes the job store hand the firing back for recovery.
+            throw;
         }
         catch (Exception error)
         {
@@ -121,7 +127,19 @@ public sealed partial class DailyReconciliationJob(
         return await scope.ServiceProvider.GetRequiredService<ReconciliationRunner>().RunAsync(businessDate, ct);
     }
 
-    private async Task ScheduleRetryAsync(IScheduler scheduler, DateOnly businessDate, int attempt, CancellationToken ct)
+    /// <summary>
+    /// When the date is tried again: a Failed run after the retry interval (section 8); a held lock after a lock TTL, by
+    /// when a holder that died has lost it (and a live holder has finished, so the retry exits AlreadyCompleted). Any
+    /// firing gets the second, a manual one included: a manual start blocked by a dead holder deserves the same recovery.
+    /// </summary>
+    private TimeSpan? RetryDelay(RunOutcome outcome) => outcome switch
+    {
+        RunOutcome.Failed => retry.Interval,
+        RunOutcome.LockNotAcquired => lockOptions.Ttl,
+        _ => null
+    };
+
+    private async Task ScheduleRetryAsync(IScheduler scheduler, DateOnly businessDate, int attempt, TimeSpan delay, CancellationToken ct)
     {
         if (attempt >= retry.MaxAttempts)
         {
@@ -129,7 +147,7 @@ public sealed partial class DailyReconciliationJob(
             return;
         }
         var next = attempt + 1;
-        var at = clock.UtcNow + retry.Interval;
+        var at = clock.UtcNow + delay;
         try
         {
             await scheduler.ScheduleTrigger(OneShot(RetryTriggerKey(businessDate, next), businessDate, next, at), TriggerConflict.Replace, ct);
@@ -137,7 +155,7 @@ public sealed partial class DailyReconciliationJob(
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            // The run stays Failed; a manual start re-runs it.
+            // A manual start re-runs the date.
             RetryNotScheduled(logger, businessDate, next, error);
         }
     }
@@ -146,15 +164,15 @@ public sealed partial class DailyReconciliationJob(
 
     [LoggerMessage(1, LogLevel.Information, "The run of {BusinessDate} ended {Outcome} (retry {Attempt})")]
     private static partial void RunEnded(ILogger logger, DateOnly businessDate, RunOutcome outcome, int attempt);
-    [LoggerMessage(2, LogLevel.Warning, "The run of {BusinessDate} was interrupted by shutdown; it stays Running until a run of that date is started again")]
+    [LoggerMessage(2, LogLevel.Warning, "The run of {BusinessDate} was interrupted by shutdown; it stays Running and the firing is handed back for recovery")]
     private static partial void RunInterrupted(ILogger logger, DateOnly businessDate);
     [LoggerMessage(3, LogLevel.Error, "The run of {BusinessDate} crashed; it stays Running until a run of that date is started again")]
     private static partial void RunCrashed(ILogger logger, DateOnly businessDate, Exception error);
-    [LoggerMessage(4, LogLevel.Error, "The run of {BusinessDate} failed on retry {Attempt}, the last one; no further retry")]
+    [LoggerMessage(4, LogLevel.Error, "The run of {BusinessDate} did not complete on retry {Attempt}, the last one; no further retry")]
     private static partial void RetriesExhausted(ILogger logger, DateOnly businessDate, int attempt);
     [LoggerMessage(5, LogLevel.Information, "Retry {Attempt} of the run of {BusinessDate} is scheduled at {At}")]
     private static partial void RetryScheduled(ILogger logger, DateOnly businessDate, int attempt, DateTimeOffset at);
-    [LoggerMessage(6, LogLevel.Error, "Retry {Attempt} of the Failed run of {BusinessDate} could not be scheduled")]
+    [LoggerMessage(6, LogLevel.Error, "Retry {Attempt} of the run of {BusinessDate} could not be scheduled")]
     private static partial void RetryNotScheduled(ILogger logger, DateOnly businessDate, int attempt, Exception error);
 }
 
@@ -186,7 +204,17 @@ public static class ReconciliationScheduling
             {
                 scheduler.InstanceName = DailyReconciliationJob.SchedulerName;
                 scheduler.GenerateInstanceId = true;
+                // A shutdown cancels the running job's token, so the run stops and releases its lock within the
+                // host's shutdown budget instead of being cut off by it.
+                scheduler.ShutdownJobInterruption = ShutdownJobInterruption.Always;
             });
+            // Every start declares the job and the cron trigger again. Once stored they are kept as they are, next fire
+            // time included, so an 00:30 missed while every node was down is still due at the next start and fires once
+            // then (the misfire instruction). Replacing the trigger would compute its next fire from the new trigger's
+            // start time, which is now, and skip the missed day; ScheduleTriggerRelativeToReplacedTrigger does not help,
+            // as the next fire is still bounded by that start time. Cost: a changed job or trigger definition reaches
+            // an existing database only once the stored one is deleted.
+            quartz.ConfigureOptions<QuartzOptions>(options => options.Scheduling.IgnoreDuplicates = true);
             quartz.UsePersistentStore(store =>
             {
                 // Resolved from configuration when the scheduler is built, so the connection string may arrive late.
@@ -197,6 +225,9 @@ public static class ReconciliationScheduling
                 {
                     options.TablePrefix = "qrtz_";
                     options.StoreJobDataAsStrings = true;
+                    // A firing the shutdown interrupted is stored as a recovery trigger, which this or another node
+                    // fires; the job sees Recovering and reconciles the same date.
+                    options.RecoverFiringsCancelledByShutdown = true;
                 });
             });
             quartz.AddJob<DailyReconciliationJob>(job => job.WithIdentity(DailyReconciliationJob.Key)
@@ -206,7 +237,7 @@ public static class ReconciliationScheduling
                     .InTimeZone(TimeZoneInfo.Utc)
                     .WithMisfireInstruction(CronTriggerMisfireInstruction.FireAndProceed)));
         });
-        // Shutdown waits for a running job, within the host's shutdown timeout.
+        // Shutdown interrupts a running job and waits for it to unwind, within the host's shutdown timeout.
         if (enabled) services.AddQuartzHostedService(options => options.WaitForJobsToComplete = true);
         return services;
     }

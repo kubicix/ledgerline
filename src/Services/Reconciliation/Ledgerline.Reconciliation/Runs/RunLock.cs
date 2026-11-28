@@ -52,6 +52,8 @@ public sealed partial class RunLock(IConnectionMultiplexer redis, LockOptions op
 
     public static string KeyFor(DateOnly businessDate) => "recon:" + businessDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
+    private ILogger Logger => logger;
+
     public async Task<IAsyncDisposable?> TryAcquireAsync(DateOnly businessDate, CancellationToken ct)
     {
         var key = KeyFor(businessDate);
@@ -126,12 +128,30 @@ public sealed partial class RunLock(IConnectionMultiplexer redis, LockOptions op
             renewal = Task.Run(() => owner.RenewAsync(key, token, stop.Token));
         }
 
+        /// <summary>
+        /// Never throws: it runs while the run's outcome (or its exception) is on its way out, and a lock problem must
+        /// neither skip the release nor replace that outcome.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
             await stop.CancelAsync();
-            await renewal;
+            try
+            {
+                await renewal;
+            }
+            catch (Exception error)
+            {
+                RenewalCrashed(owner.Logger, key, error);
+            }
             stop.Dispose();
-            await owner.ReleaseAsync(key, token);
+            try
+            {
+                await owner.ReleaseAsync(key, token);
+            }
+            catch (Exception error)
+            {
+                ReleaseFailed(owner.Logger, key, error);
+            }
         }
     }
 
@@ -150,4 +170,6 @@ public sealed partial class RunLock(IConnectionMultiplexer redis, LockOptions op
     private static partial void RenewFailed(ILogger logger, string key, Exception error);
     [LoggerMessage(4, LogLevel.Warning, "Releasing the lock {Key} failed; it expires with its TTL")]
     private static partial void ReleaseFailed(ILogger logger, string key, Exception error);
+    [LoggerMessage(5, LogLevel.Warning, "Renewing the lock {Key} stopped on an unexpected error; the lock is released anyway")]
+    private static partial void RenewalCrashed(ILogger logger, string key, Exception error);
 }

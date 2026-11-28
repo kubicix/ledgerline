@@ -285,6 +285,164 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
     }
 
     [Fact]
+    public async Task Held_lock_schedules_a_retry_after_the_lock_ttl()
+    {
+        var date = new DateOnly(2026, 11, 13);
+        // A node died mid-run: its Running row and its lock (another token) are left behind.
+        await using var redis = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+        var key = RunLock.KeyFor(date);
+        (await redis.GetDatabase().StringSetAsync(key, "dead-holder", TimeSpan.FromMinutes(1))).ShouldBeTrue();
+        try
+        {
+            await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: SchedulerSettings());
+            var stale = Guid.NewGuid();
+            await ExecuteAsync(host, $"""
+                INSERT INTO reconciliation_runs (id, business_date, status, started_at) VALUES ('{stale}', '2026-11-13', 'Running', now() - interval '5 minutes')
+                """);
+            var scheduler = await host.Services.GetRequiredService<ISchedulerFactory>().GetScheduler(Ct);
+            var before = DateTimeOffset.UtcNow;
+
+            // A scheduled firing that is itself retry 2 of the date: the retry it schedules is number 3 of the same budget.
+            await scheduler.ScheduleJob(TriggerBuilder.Create().ForJob(DailyReconciliationJob.Key)
+                .UsingJobData(DailyReconciliationJob.BusinessDateKey, "2026-11-13").UsingJobData(DailyReconciliationJob.AttemptKey, "2")
+                .StartNow().Build(), cancellationToken: Ct);
+
+            ITrigger? retry = null;
+            await Eventually.ShouldAsync(async () => (retry = await scheduler.GetTrigger(DailyReconciliationJob.RetryTriggerKey(date, 3), Ct)) is not null,
+                TimeSpan.FromSeconds(60), "The run that found the lock held scheduled no retry.");
+            var after = DateTimeOffset.UtcNow;
+            retry!.JobDataMap.GetString(DailyReconciliationJob.BusinessDateKey).ShouldBe("2026-11-13");
+            retry.JobDataMap.GetString(DailyReconciliationJob.AttemptKey).ShouldBe("3");
+            // The lock TTL of these tests is 30 s.
+            retry.StartTimeUtc.ShouldBeInRange(before + TimeSpan.FromSeconds(30), after + TimeSpan.FromSeconds(30));
+            // Nothing was touched: the run is not ours until the lock is.
+            ((string?)await redis.GetDatabase().StringGetAsync(key)).ShouldBe("dead-holder");
+            var run = await RunRowAsync(host, date);
+            (run.Id, run.Status).ShouldBe((stale, "Running"));
+        }
+        finally
+        {
+            await redis.GetDatabase().KeyDeleteAsync(key);
+        }
+    }
+
+    [Fact]
+    public async Task Shutdown_interrupts_the_run_and_hands_the_firing_back()
+    {
+        var date = new DateOnly(2026, 11, 14);
+        // Kafka unreachable: the run sits in its input wait (2 minutes here) when the host stops.
+        var host = await StagingHost.StartAsync(infrastructure, extraSettings: SchedulerSettings());
+        var stopped = false;
+        try
+        {
+            await using var redis = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(infrastructure.RedisConnectionString);
+            await host.Services.GetRequiredService<IRunTrigger>().TriggerAsync(date, Ct);
+            await Eventually.ShouldAsync(async () => (await RowsAsync(host, "SELECT status FROM reconciliation_runs")).SequenceEqual(["Running"]) &&
+                await redis.GetDatabase().KeyExistsAsync(RunLock.KeyFor(date)), TimeSpan.FromSeconds(60), "The run did not start.");
+
+            var watch = Stopwatch.StartNew();
+            await host.DisposeAsync();
+            stopped = true;
+
+            // Interrupted, not waited out: the input wait alone would take 2 minutes, the host budget is 25 s.
+            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
+            (await redis.GetDatabase().KeyExistsAsync(RunLock.KeyFor(date))).ShouldBeFalse();
+            var run = await RunRowAsync(host, date);
+            (run.Status, run.Error).ShouldBe(("Running", (string?)null));
+            // Handed back: a recovery trigger for the job, which the next node to start (or a live one) fires.
+            (await RowsAsync(host, "SELECT concat_ws('|', trigger_group, job_name) FROM qrtz_triggers WHERE trigger_group = 'RECOVERING_JOBS'"))
+                .ShouldBe([$"RECOVERING_JOBS|{DailyReconciliationJob.Key.Name}"]);
+        }
+        finally
+        {
+            if (!stopped) await host.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Missed_daily_fire_is_made_up_after_a_restart()
+    {
+        var settings = SchedulerSettings();
+        var now = DateTimeOffset.UtcNow;
+        var lastFire = new DateTimeOffset(now.UtcDateTime.Date.AddMinutes(30), TimeSpan.Zero);
+        if (lastFire > now) lastFire = lastFire.AddDays(-1);
+        var yesterday = DateOnly.FromDateTime(now.UtcDateTime).AddDays(-1);
+        string connectionString;
+        await using (var first = await StagingHost.StartAsync(infrastructure, extraSettings: settings))
+        {
+            connectionString = first.ConnectionString;
+            await Eventually.ShouldAsync(async () => (await RowsAsync(first, "SELECT trigger_name FROM qrtz_cron_triggers")).Count == 1,
+                TimeSpan.FromSeconds(30), "The daily trigger was not stored.");
+        }
+        // Every node was down over the last 00:30: the stored trigger last fired the day before and is still due.
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var command = new NpgsqlCommand("""
+                UPDATE qrtz_triggers SET prev_fire_time = @previous, next_fire_time = @next WHERE trigger_name = @name
+                """, connection);
+            command.Parameters.AddWithValue("previous", lastFire.AddDays(-1).UtcTicks);
+            command.Parameters.AddWithValue("next", lastFire.UtcTicks);
+            command.Parameters.AddWithValue("name", DailyReconciliationJob.DailyTriggerKey.Name);
+            (await command.ExecuteNonQueryAsync(Ct)).ShouldBe(1);
+        }
+
+        // The restart re-declares the trigger; the missed fire happens once now, for yesterday.
+        await using var restarted = await ServiceHost<Program>.StartOnDatabaseAsync(infrastructure, connectionString, settings: settings);
+        await Eventually.ShouldAsync(async () => (await DatesAsync(connectionString)).Count > 0, TimeSpan.FromSeconds(90),
+            "The missed daily fire was not made up.");
+        (await DatesAsync(connectionString)).ShouldBe([yesterday]);
+        var scheduler = await restarted.Services.GetRequiredService<ISchedulerFactory>().GetScheduler(Ct);
+        (await scheduler.GetTrigger(DailyReconciliationJob.DailyTriggerKey, Ct))!.NextFireTimeUtc.ShouldBe(lastFire.AddDays(1));
+    }
+
+    [Fact]
+    public async Task Concurrent_reruns_of_an_incomplete_run_publish_one_event_set()
+    {
+        var date = new DateOnly(2026, 11, 11);
+        var gate = new BothPassLock(2);
+        await using var scenario = await StartAsync(date, overrides: services => services.AddSingleton<IRunLock>(gate));
+        // A run that completed while Kafka lagged; its events went out with it (not in this database's outbox here).
+        var incomplete = Guid.NewGuid();
+        await ExecuteAsync(scenario.Host, $"""
+            INSERT INTO reconciliation_runs (id, business_date, status, matched, mismatched, inputs_incomplete, started_at, completed_at)
+            VALUES ('{incomplete}', '2026-11-11', 'Completed', 0, 1, true, now() - interval '1 hour', now() - interval '50 minutes');
+            INSERT INTO reconciliation_items (id, run_id, code, reference, bank_amount_minor, ledger_amount_minor, currency)
+            VALUES ('{Guid.NewGuid()}', '{incomplete}', 'UnknownBankRecord', 'stale', 1, NULL, 'TRY');
+            """);
+
+        var outcomes = await Task.WhenAll(Task.Run(scenario.RunAsync, Ct), Task.Run(scenario.RunAsync, Ct));
+
+        outcomes.Count(x => x == RunOutcome.Completed).ShouldBe(1);
+        outcomes.Single(x => x != RunOutcome.Completed).ShouldBeOneOf(RunOutcome.AlreadyCompleted, RunOutcome.Superseded);
+        var run = await RunRowAsync(scenario.Host, date);
+        (run.Id, run.Status, run.InputsIncomplete, run.Matched, run.Mismatched).ShouldBe((incomplete, "Completed", false, 3, 0));
+        (await ItemsAsync(scenario.Host)).ShouldBeEmpty();
+        var outbox = await OutboxAsync(scenario.Host);
+        outbox.Select(x => x.Type).ShouldBe([CompletedType, ReconciledType], ignoreOrder: true);
+        outbox.ShouldAllBe(x => x.CorrelationId == incomplete);
+    }
+
+    [Fact]
+    public async Task Superseded_runner_does_not_mark_the_run_Failed()
+    {
+        var date = new DateOnly(2026, 11, 12);
+        // While this runner fetches the file, another runner takes the run over; then the bank fails this one.
+        var bank = new TakeoverThenFail();
+        await using var host = await StagingHost.StartAsync(infrastructure, extraSettings: RunSettings(), overrides: services =>
+            services.AddSingleton(new BankSettlementClient(new HttpClient(bank) { BaseAddress = new Uri("http://bank.test/") })));
+        bank.Takeover = () => ExecuteAsync(host, "UPDATE reconciliation_runs SET started_at = started_at + interval '1 second'");
+
+        await using (var scope = host.Services.CreateAsyncScope())
+            (await scope.ServiceProvider.GetRequiredService<ReconciliationRunner>().RunAsync(date, Ct)).ShouldBe(RunOutcome.Superseded);
+
+        // The run belongs to the other runner: still Running, no error of ours.
+        var run = await RunRowAsync(host, date);
+        (run.Status, run.Error).ShouldBe(("Running", (string?)null));
+        (await OutboxAsync(host)).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Reconciled_payment_ids_are_published_in_batches_of_500()
     {
         var date = new DateOnly(2026, 11, 8);
@@ -355,6 +513,29 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         };
         foreach (var (key, value) in extra ?? new Dictionary<string, string?>()) settings[key] = value;
         return settings;
+    }
+
+    /// <summary>
+    /// A host whose scheduler runs, whose Kafka cannot be reached (so a run waits out its input wait unless it stops)
+    /// and whose bank listens nowhere.
+    /// </summary>
+    private static Dictionary<string, string?> SchedulerSettings() => RunSettings(new()
+    {
+        ["Reconciliation:Scheduler:Enabled"] = "true",
+        [StagingOptions.BootstrapServersKey] = "127.0.0.1:9",
+        ["Bank:BaseUrl"] = $"http://127.0.0.1:{ClosedPort()}/",
+        ["Bank:TimeoutSeconds"] = "2"
+    });
+
+    private static async Task<List<DateOnly>> DatesAsync(string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand("SELECT business_date FROM reconciliation_runs", connection);
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        var dates = new List<DateOnly>();
+        while (await reader.ReadAsync(Ct)) dates.Add(reader.GetFieldValue<DateOnly>(0));
+        return dates;
     }
 
     /// <param name="produceInputs">False leaves producing the Kafka records (and waiting for staging) to the test.</param>
@@ -625,6 +806,18 @@ public sealed class RunTests(InfrastructureFixture infrastructure)
         {
             await gate.WaitAsync(ct);
             await inner.ApplyAsync(envelope, db, ct);
+        }
+    }
+
+    /// <summary>A bank that lets another runner take the run over while it is asked, then answers 503.</summary>
+    private sealed class TakeoverThenFail : HttpMessageHandler
+    {
+        public Func<Task>? Takeover { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Takeover!();
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
         }
     }
 

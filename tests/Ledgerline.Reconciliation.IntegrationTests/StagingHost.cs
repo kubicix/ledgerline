@@ -137,8 +137,14 @@ public sealed class StagingHost : IAsyncDisposable
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = options.BootstrapServers }).Build();
         try
         {
-            await admin.CreateTopicsAsync(options.Topics.Select(name =>
-                new TopicSpecification { Name = name, NumPartitions = Partitions, ReplicationFactor = 1 }));
+            // Unlimited retention, as the Compose kafka-init creates the real topics. The run tests produce records with
+            // timestamps weeks in the past; under the broker's default 7-day retention its first check (about 30 s after
+            // start) deleted them before staging read them, and the consumer silently reset past them.
+            await admin.CreateTopicsAsync(options.Topics.Select(name => new TopicSpecification
+            {
+                Name = name, NumPartitions = Partitions, ReplicationFactor = 1,
+                Configs = new Dictionary<string, string> { ["retention.ms"] = "-1", ["cleanup.policy"] = "delete" }
+            }));
         }
         catch (CreateTopicsException error) when (error.Results.All(x => x.Error.Code is ErrorCode.NoError or ErrorCode.TopicAlreadyExists)) { }
     }

@@ -76,16 +76,20 @@ public sealed partial class ReconciliationRunner(
     /// Step 2. A new date is claimed by the insert. A Completed date with complete inputs exits: the day is done. A
     /// Running (crashed or concurrent) or Failed run, or a Completed one flagged <c>inputs_incomplete</c> (section 8:
     /// "the run completes and can be re-run"), is taken over by <see cref="ReclaimAsync"/>; losing that race to another
-    /// claimant means deciding again.
+    /// claimant means deciding again. An incomplete Completed run is re-run only when this runner found it so on its
+    /// first decision: after a lost race, the Completed run it then finds is another runner's fresh completion (or a
+    /// re-run claimed and completed meanwhile), and re-running it at once would publish a second event set.
     /// </summary>
     private async Task<(Claim? Claim, RunOutcome Exit)> ClaimAsync(DateOnly businessDate, CancellationToken ct)
     {
+        var firstDecision = true;
         for (var attempt = 0; attempt < MaxClaimAttempts; attempt++)
         {
             if (await InsertRunAsync(businessDate, ct) is { } inserted) return (inserted, default);
             var existing = await db.Runs.AsNoTracking().SingleOrDefaultAsync(x => x.BusinessDate == businessDate, ct);
             if (existing is null) continue;
-            if (existing.Status == Completed && !existing.InputsIncomplete) return (null, RunOutcome.AlreadyCompleted);
+            if (existing.Status == Completed && (!existing.InputsIncomplete || !firstDecision)) return (null, RunOutcome.AlreadyCompleted);
+            firstDecision = false;
             if (await ReclaimAsync(existing, ct) is { } reclaimed) return (reclaimed, default);
         }
         ClaimLost(logger, businessDate);
@@ -106,8 +110,10 @@ public sealed partial class ReconciliationRunner(
 
     /// <summary>
     /// Takes over a Running, Failed or incomplete Completed run, the run id staying the same: an optimistic update on the observed
-    /// <c>started_at</c>, which it moves strictly forward so no two claimants ever hold the same token, and the delete of
-    /// the run's items, in one transaction. Null when the run changed since it was read.
+    /// <c>started_at</c> and status, which it moves strictly forward so no two claimants ever hold the same token, and the
+    /// delete of the run's items, in one transaction. Null when the run changed since it was read: the status matters as
+    /// well as the token, because completing a run keeps its <c>started_at</c>, so an observed Running run that was
+    /// completed with incomplete inputs meanwhile must not be taken over.
     /// </summary>
     private async Task<Claim?> ReclaimAsync(ReconciliationRun observed, CancellationToken ct)
     {
@@ -116,7 +122,8 @@ public sealed partial class ReconciliationRunner(
             UPDATE reconciliation_runs
             SET status = 'Running', started_at = GREATEST({clock.UtcNow}, started_at + interval '1 microsecond'), error = NULL,
                 inputs_incomplete = false, matched = 0, mismatched = 0, completed_at = NULL
-            WHERE id = {observed.Id} AND (status <> 'Completed' OR inputs_incomplete) AND started_at = {observed.StartedAt}
+            WHERE id = {observed.Id} AND status = {observed.Status} AND (status <> 'Completed' OR inputs_incomplete)
+                AND started_at = {observed.StartedAt}
             RETURNING started_at AS "Value"
             """).ToListAsync(ct);
         if (startedAt.Count == 0) return null;
